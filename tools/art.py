@@ -132,6 +132,7 @@ def glass(a, x, y, w, h, warm):
     a.poly([(x+2,y+2),(x+5,y+2),(x+2,y+h-3)], "#ffce8b" if warm else "#85929c")
     a.rect(x+w//2, y, 1, h, "#3d3239")
     a.rect(x, y+h//2, w, 1, "#523d41")
+    a.rect(x+w-2, y+1, 1, h-2, "#b57259" if warm else "#657487")
     a.rect(x-2, y+h+1, w+4, 2, "#ba9181")
 
 
@@ -378,10 +379,6 @@ def car_frame(row):
     horizontal = row >= 2
     if horizontal:
         a.oval(2,17,41,16,(29,24,33,132))
-        for x in (8,29):
-            a.oval(x,25,8,7,INK)
-            a.oval(x+2,26,5,5,"#655d69")
-            a.rect(x+3,27,2,2,"#a29597")
         a.poly([(2,17),(5,14),(11,13),(16,10),(28,10),(33,14),(39,15),(42,18),
                 (42,25),(39,29),(4,29),(2,26)],INK)
         a.poly([(3,18),(6,15),(13,14),(17,11),(27,11),(33,15),(39,16),(41,18),
@@ -399,6 +396,10 @@ def car_frame(row):
             a.rect(x,22,3,1,"#a3a0aa")
         a.rect(39,21,2,2,"#f1cf94")
         a.rect(3,22,2,2,"#cb6258")
+        for x in (7,30):
+            a.oval(x,24,8,8,INK)
+            a.oval(x+2,26,4,4,"#6c6571")
+            a.rect(x+3,27,2,1,"#a29597")
         return a.image if row == 3 else a.image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     a.oval(13,4,19,39,(29,24,33,132))
     for x in (12,27):
@@ -450,7 +451,7 @@ def pedestrian_frame(model, row, frame):
     }[model]
     palette = {tuple(bytes.fromhex(k[1:])) + (255,): tuple(bytes.fromhex(v[1:])) + (255,)
                for k,v in colors.items()}
-    source.putdata([palette.get(pixel,pixel) for pixel in source.getdata()])
+    source.putdata([palette.get(pixel,pixel) for pixel in source.get_flattened_data()])
     art.image.paste(source)
 
     if model == 1:
@@ -502,7 +503,7 @@ def taxi_frame(row):
     }
     palette = {tuple(bytes.fromhex(k))+(255,): tuple(bytes.fromhex(v))+(255,)
                for k,v in colors.items()}
-    source.putdata([palette.get(pixel,pixel) for pixel in source.getdata()])
+    source.putdata([palette.get(pixel,pixel) for pixel in source.get_flattened_data()])
     art.image.paste(source,(2,2))
     if row >= 2:
         for x in range(8,40):
@@ -530,23 +531,19 @@ def utility_frame(row, van):
     roof = "#cdc0ad" if van else "#635a62"
     if row >= 2:
         a.oval(1,17,46,17,(28,24,33,130))
-        for x in (6,32):
-            a.oval(x,24,10,10,INK)
-            a.oval(x+2,26,6,6,"#6f6069")
-            a.rect(x+4,28,2,2,"#aa998e")
-        a.poly([(1,12),(4,9),(24,9),(30,12),(35,15),(43,16),(46,19),
+        back = 9 if van else 13
+        a.poly([(1,back+3),(4,back),(24,back),(30,12),(35,15),(43,16),(46,19),
                 (46,27),(43,30),(4,30),(1,27)],INK)
-        a.poly([(2,13),(5,10),(24,10),(29,13),(34,16),(43,17),(45,20),
+        a.poly([(2,back+4),(5,back+1),(24,back+1),(29,13),(34,16),(43,17),(45,20),
                 (45,26),(42,28),(4,28),(2,26)],body)
-        a.poly([(5,10),(24,10),(29,13),(31,16),(5,16)],roof)
-        a.line([(5,10),(24,10),(28,12)],light)
-        a.poly([(25,12),(28,13),(34,17),(30,20),(26,17)],"#333642")
+        a.poly([(5,back+1),(24,back+1),(29,13),(31,16),(5,16)],roof)
+        a.line([(5,back+1),(24,back+1),(28,12 if van else 14)],light)
+        a.poly([(25,12 if van else 14),(28,13),(34,17),(30,20),(26,17)],"#333642")
         a.line([(28,14),(31,17),(30,18)],"#62707d")
         a.rect(8,18,17,5,dark if van else "#292a36")
         if not van:
             a.rect(15,18,2,5,body)
-            a.rect(7,12,14,1,light)
-            a.rect(7,15,14,1,dark)
+            a.rect(7,15,14,1,"#736972")
         else:
             a.rect(7,12,15,1,"#b3a297")
             a.rect(7,14,15,1,"#ac9d91")
@@ -558,6 +555,11 @@ def utility_frame(row, van):
         a.rect(27,25,3,1,light)
         a.rect(43,20,2,3,"#efd09b")
         a.rect(2,21,2,4,"#a54e48")
+        for x in (6,32):
+            a.oval(x,24,10,10,INK)
+            a.oval(x+2,26,6,6,"#514a58")
+            a.oval(x+3,27,4,4,"#82737b")
+            a.rect(x+4,28,2,1,"#aa998e")
         return a.image if row == 3 else a.image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     a.oval(11,3,26,44,(28,24,33,130))
     for x in (12,30):

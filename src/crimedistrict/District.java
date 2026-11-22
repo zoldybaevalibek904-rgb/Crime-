@@ -15,14 +15,14 @@ final class District {
     private static final int ACCELERATION = 64;
     private static final int BRAKE = 106;
     private static final int[] PICKUP = {274, 257};
-    private static final int[] DELIVERY = {435, 523};
+    private static final int[] DELIVERY = {435, 534};
     static final int TO_PICKUP = 0, TO_DELIVERY = 1, COMPLETE = 2;
 
     // The same Downtown streets and sidewalks serve both the player and these routes.
     private static final int[][] ROUTES = {
-        {306, 170, 487, 170},
-        {306, 259, 480, 259},
-        {315, 451, 482, 451},
+        {306, 173, 452, 173, 452, 158, 444, 158, 444, 173},
+        {306, 259, 480, 259, 480, 274, 306, 274},
+        {315, 451, 482, 451, 482, 460, 315, 460},
         {199, 194, 561, 194, 561, 490, 199, 490},
     };
 
@@ -30,7 +30,7 @@ final class District {
         final int model;
         final boolean vehicle;
         final int[] route;
-        int x, y, dir, waypoint, wait, stride, speed;
+        int x, y, dir, waypoint, wait, stride, speed, blocked, routeStep;
         boolean moving;
 
         Actor(int model, boolean vehicle, int[] route) {
@@ -97,9 +97,9 @@ final class District {
         walking = driving = false;
         velocityX = velocityY = stride = ticks = celebration = 0;
         mission = TO_PICKUP;
-        place(street[0], 323, 170, RIGHT, 2);
+        place(street[0], 323, 173, RIGHT, 2);
         place(street[1], 347, 259, RIGHT, 2);
-        place(street[2], 451, 451, LEFT, 0);
+        place(street[2], 451, 460, LEFT, 6);
         place(street[3], 336, 194, RIGHT, 2);
         place(street[4], 561, 320, DOWN, 4);
         place(street[5], 404, 490, LEFT, 6);
@@ -112,7 +112,8 @@ final class District {
         actor.y = y * UNIT;
         actor.dir = dir;
         actor.waypoint = waypoint;
-        actor.wait = actor.stride = actor.speed = 0;
+        actor.routeStep = 2;
+        actor.wait = actor.stride = actor.speed = actor.blocked = 0;
         actor.moving = false;
     }
 
@@ -236,7 +237,7 @@ final class District {
         int dx = actor.route[actor.waypoint] * UNIT - actor.x;
         int dy = actor.route[actor.waypoint + 1] * UNIT - actor.y;
         if (dx == 0 && dy == 0) {
-            actor.waypoint = (actor.waypoint + 2) % actor.route.length;
+            nextWaypoint(actor);
             if (!actor.vehicle) {
                 actor.wait = 20 + actor.model * 11;
                 actor.stride = 0;
@@ -260,13 +261,23 @@ final class District {
         int x = actor.x + DX[dir] * step, y = actor.y + DY[dir] * step;
         if (actor.vehicle ? freeVehicle(actor, x, y, dir) : freePedestrian(actor, x, y)) {
             actor.dir = dir;
+            actor.blocked = 0;
             actor.x = x;
             actor.y = y;
             actor.moving = true;
             actor.stride = (actor.stride + elapsed) % 32;
         } else if (actor.vehicle) {
             actor.speed = 0;
+        } else if ((actor.blocked += elapsed) >= 28) {
+            actor.routeStep = -actor.routeStep;
+            nextWaypoint(actor);
+            actor.wait = 16;
+            actor.blocked = actor.stride = 0;
         }
+    }
+
+    private void nextWaypoint(Actor actor) {
+        actor.waypoint = (actor.waypoint + actor.routeStep + actor.route.length) % actor.route.length;
     }
 
     boolean nearCar() {
@@ -359,7 +370,7 @@ final class District {
         if (x < 0 || y < 0 || x + w > width || y + h > height) return false;
         for (int i = 0; i < props.length; i++) {
             Prop p = props[i];
-            if (p.width > 0 && overlaps(x, y, w, h, p.left, p.top, p.width, p.height)) return false;
+            if (p.depth > y && p.width > 0 && overlaps(x, y, w, h, p.left, p.top, p.width, p.height)) return false;
         }
         return true;
     }

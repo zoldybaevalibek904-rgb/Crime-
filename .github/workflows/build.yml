@@ -17,6 +17,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - run: tools/build.sh
+      - run: tools/test-model.sh
       - uses: actions/upload-artifact@v4
         with:
           name: crime-district-alpha02

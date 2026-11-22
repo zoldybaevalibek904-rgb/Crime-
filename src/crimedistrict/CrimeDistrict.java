@@ -307,7 +307,7 @@ public final class CrimeDistrict extends MIDlet {
         }
 
         private void drawTarget(Graphics g, int x, int y, int w, int h) {
-            int margin = 12, top = 58, bottom = h - 35;
+            int margin = 12, top = w >= 236 ? 58 : 74, bottom = h - 35;
             if (x >= margin && x <= w - margin && y >= top && y <= bottom) {
                 g.setColor(0x28252e);
                 g.drawArc(x - 11, y - 6, 22, 12, 0, 360);
@@ -344,7 +344,7 @@ public final class CrimeDistrict extends MIDlet {
             if (city.mission != District.COMPLETE || city.celebration > 0) {
                 String title = city.mission == District.COMPLETE ? "DELIVERY COMPLETE" : "FIRST DELIVERY";
                 String task = city.mission == District.TO_PICKUP ? "Walk to pickup" :
-                              city.mission == District.TO_DELIVERY ? "Drive to drop-off" : "Free roam";
+                              city.mission == District.TO_DELIVERY ? (city.driving ? "Drive to drop-off" : "Take the sedan") : "Free roam";
                 int boardWidth = Math.min(123, w - 16);
                 int bx = w - boardWidth - 8;
                 int by = w >= 236 ? 8 : 31;
