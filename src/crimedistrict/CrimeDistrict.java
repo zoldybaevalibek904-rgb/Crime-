@@ -15,7 +15,7 @@ public final class CrimeDistrict extends MIDlet {
     protected void startApp() {
         if (screen == null) screen = new Screen();
         Display.getDisplay(this).setCurrent(screen);
-        screen.resume();
+        if (screen.isShown()) screen.resume();
     }
 
     protected void pauseApp() { if (screen != null) screen.suspend(); }
@@ -37,6 +37,7 @@ public final class CrimeDistrict extends MIDlet {
         private static final int HERO = -2, SEDAN = -1;
         private volatile boolean active, closed;
         private Thread loop;
+        private boolean bufferDirty = true;
         private int state, selection, held, pressed;
 
         Screen() {
@@ -60,6 +61,8 @@ public final class CrimeDistrict extends MIDlet {
         }
 
         synchronized void resume() {
+            if (closed) return;
+            bufferDirty = true;
             active = true;
             if (loop == null) {
                 loop = new Thread(this);
@@ -79,7 +82,11 @@ public final class CrimeDistrict extends MIDlet {
         }
 
         protected void hideNotify() { suspend(); }
-        protected void showNotify() { if (!closed) resume(); }
+        protected void showNotify() { resume(); }
+
+        protected synchronized void sizeChanged(int width, int height) {
+            bufferDirty = true;
+        }
 
         private int keyBit(int code) {
             switch (code) {
@@ -119,12 +126,13 @@ public final class CrimeDistrict extends MIDlet {
         }
 
         public void run() {
-            Graphics graphics = getGraphics();
+            Graphics graphics = null;
             long deadline = System.currentTimeMillis();
             int fraction = 0;
             try {
                 while (!closed) {
                     int keys, edges;
+                    boolean refreshBuffer;
                     synchronized (this) {
                         while (!active && !closed) {
                             if (state == PLAY) { state = PAUSE; selection = 0; }
@@ -135,7 +143,10 @@ public final class CrimeDistrict extends MIDlet {
                         keys = held;
                         edges = pressed;
                         pressed = 0;
+                        refreshBuffer = bufferDirty;
+                        bufferDirty = false;
                     }
+                    if (refreshBuffer) graphics = getGraphics();
                     if (city != null) advance(keys | edges, edges);
                     else if ((edges & (BACK | FIRE)) != 0) exit();
                     render(graphics);
