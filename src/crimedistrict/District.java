@@ -12,18 +12,19 @@ final class District {
     static final int UNIT = 256;
     static final int HERO_SPEED = 360;
     static final int CAR_SPEED = 920;
-    static final int PEDESTRIAN_MODELS = 25;
+    static final int PEDESTRIAN_MODELS = 26;
     static final int ROAD = 0, SIDEWALK = 1, BUILDING = 2, SAND = 3, WATER = 4, PARKING = 5, DECOR = 6, BLOCKED = 7;
-    private static final int[] LIMIT = {920, 860, 790, 690, 920};
-    private static final int[] ACCEL = {64, 79, 52, 42, 64};
-    private static final int[] BRAKE = {106, 128, 90, 73, 106};
+    private static final int[] LIMIT = {920, 860, 790, 690, 920, 800};
+    private static final int[] ACCEL = {64, 79, 52, 42, 64, 61};
+    private static final int[] BRAKE = {106, 128, 90, 73, 106, 96};
 
     static final class Actor {
         final int model, role, startX, startY, startDir, startWaypoint;
         final boolean vehicle;
         final int[] route;
         int x, y, dir, waypoint, wait, stride, speed, blocked, routeStep, duty;
-        boolean moving, claimed, deferred;
+        int hp, hit, threat, panic, strike, hitPose, fallen;
+        boolean moving, claimed, deferred, removed;
 
         Actor(int model, boolean vehicle, int role, int x, int y, int dir, int waypoint, int[] route) {
             this.model = model;
@@ -43,7 +44,10 @@ final class District {
             waypoint = startWaypoint;
             wait = stride = speed = blocked = 0;
             routeStep = 2;
-            moving = claimed = deferred = false;
+            moving = claimed = removed = false;
+            deferred = role==Street.EMS || role==Street.MEDIC || role==Street.GARAGE;
+            hp = !vehicle && (role==Street.RED || role==Street.IRON) ? 74 : 100;
+            hit = threat = panic = strike = hitPose = fallen = 0;
             duty = route.length > 2 ? Street.PATROL : Street.IDLE;
         }
     }
@@ -53,11 +57,15 @@ final class District {
     }
 
     final int columns, rows, width, height;
-    final byte[] tiles, zones;
+    private final Tiles map;
     final Prop[] props;
     private final Prop[][] solidBands;
     final Actor[] street = Street.populate();
     final Story story = new Story();
+    final Combat combat = new Combat();
+    final Trade trade = new Trade();
+    final EMS ems = new EMS();
+    int lifeRevision;
     Actor car;
     int heroX, heroY, heroDir;
     private int velocityX, velocityY;
@@ -70,14 +78,11 @@ final class District {
         if (stream == null) throw new IOException("Missing city map");
         DataInputStream in = new DataInputStream(stream);
         try {
-            columns = in.readUnsignedByte();
-            rows = in.readUnsignedByte();
-            width = columns * 16;
-            height = rows * 16;
-            tiles = new byte[columns * rows];
-            zones = new byte[tiles.length];
-            in.readFully(tiles);
-            in.readFully(zones);
+            map = new Tiles(in);
+            columns = map.columns;
+            rows = map.rows;
+            width = columns*16;
+            height = rows*16;
             props = new Prop[in.readUnsignedShort()];
             for (int i = 0; i < props.length; i++) {
                 Prop p = new Prop();
@@ -117,7 +122,11 @@ final class District {
         walking = driving = false;
         velocityX = velocityY = stride = ticks = wanted = unseen = offenceCooldown = caught = notice = 0;
         story.reset();
+        combat.reset();
+        trade.reset();
+        lifeRevision=0;
         for (int i = 0; i < street.length; i++) street[i].reset();
+        ems.reset(this);
         car = street[0];
         cameraX = heroX;
         cameraY = heroY;
@@ -128,33 +137,69 @@ final class District {
     int sector() { return (focusX()/UNIT >= 768 ? 1 : 0) + (focusY()/UNIT >= 704 ? 2 : 0); }
 
     int tileAt(int x, int y) {
-        return tiles[y*columns+x] & 255;
+        return map.get(x,y)&63;
+    }
+
+    int zoneAt(int col, int row) { return map.get(col,row)>>6; }
+
+    int neighborhood() {
+        int x = focusX()/UNIT/768, y = focusY()/UNIT/704;
+        if (x < 2 && y < 2) return sector();
+        if (y == 0 && x == 2) return 4;
+        if (y == 1 && x >= 2) return 8;
+        if (y == 3 && x < 2 || y == 2 && x == 2) return 7;
+        if (x == 3 && y >= 2 || x == 1 && y == 2 || x == 3 && y == 0) return 6;
+        return 5;
     }
 
     void tick(boolean up, boolean down, boolean left, boolean right, boolean action) {
-        if (action) {
+        tick(up,down,left,right,action,0);
+    }
+
+    void tick(boolean up, boolean down, boolean left, boolean right, boolean action, int controls) {
+        boolean normal=combat.life==Combat.NORMAL;
+        if (normal && action) {
             if (driving) {
                 if (canLeaveCar()) leaveCar();
             } else {
                 Actor next = nearbyCar();
                 if (next != null) {
                     car = next;
-                    if (!car.claimed && car.role == Street.CIVILIAN) offence();
+                    if (!car.claimed && car.role == Street.CIVILIAN) reportCrime(1,true);
                     car.claimed = true;
                     car.speed = velocityX = velocityY = 0;
                     driving = true;
                 }
             }
         }
-        if (driving) drive(up, down, left, right);
-        else walk(up, down, left, right);
-
+        if (normal) {
+            if (driving) {
+                if (car.hp>0) drive(up, down, left, right);
+                else velocityX=velocityY=0;
+                if ((controls&1)!=0 && ticks%12==0)
+                    startle(car.x/UNIT,car.y/UNIT,62);
+            } else if (combat.hurt<7) walk(up, down, left, right);
+        }
         ticks++;
+        combat.tick(this,controls);
+        ems.tick(this);
         if (offenceCooldown > 0) offenceCooldown--;
         if (notice > 0) notice--;
         boolean seen = false;
         for (int i = 0; i < street.length; i++) {
             Actor actor = street[i];
+            if (actor.role==Street.EMS || actor.role==Street.MEDIC || actor.role==Street.GARAGE) continue;
+            if (actor.hp==0 && !actor.vehicle) {
+                if (ticks-actor.fallen>1100 && !onCamera(actor.x,actor.y)) {
+                    actor.deferred = true;
+                    actor.removed = true;
+                }
+                if (actor.removed && ticks-actor.fallen>1300 && distance(actor,focusX(),focusY())>290) {
+                    actor.reset();
+                    if (!spawnClear(actor)) actor.deferred=true;
+                }
+                continue;
+            }
             if (actor.deferred) {
                 if (((ticks+i)&31) != 0 || distance(actor,focusX(),focusY()) < 235 || !spawnClear(actor)) continue;
                 actor.deferred = false;
@@ -162,8 +207,8 @@ final class District {
             if (actor.claimed || (actor.vehicle && actor.route.length == 0)) continue;
             int distance = distance(actor, focusX(), focusY());
             boolean distant = absolute(actor.x-cameraX) > 176*UNIT || absolute(actor.y-cameraY) > 216*UNIT;
-            if (actor.role == Street.POLICE && wanted > 0 && distance < sightRange() &&
-                visible(actor.x, actor.y, focusX(), focusY())) seen = true;
+            if (!actor.deferred && actor.hp>0 && actor.role == Street.POLICE && wanted > 0 && distance < sightRange() &&
+                canSee(actor.x, actor.y, focusX(), focusY())) seen = true;
             if (distant && (((ticks+i)&3) != 0 || distance > 540)) continue;
             updateActor(actor, distant ? 4 : 1, distance);
         }
@@ -173,8 +218,7 @@ final class District {
                 if (!driving && policeAtFeet()) {
                     if (++caught >= 46) {
                         wanted = caught = 0;
-                        notice = 90;
-                        story.caught();
+                        combat.end(this,Combat.BUSTED);
                     }
                 } else caught = 0;
             } else {
@@ -182,7 +226,92 @@ final class District {
                 if (++unseen >= 180) { unseen = 0; wanted--; }
             }
         }
-        story.tick(this);
+        if (combat.life==Combat.NORMAL) story.tick(this);
+        trade.tick(this);
+    }
+
+    void startle(int x,int y,int radius) {
+        for (int i=0;i<street.length;i++) {
+            Actor a=street[i];
+            if (!a.vehicle && !a.deferred && a.hp>0 && a.role==Street.CIVILIAN &&
+                    absolute(a.x/UNIT-x)+absolute(a.y/UNIT-y)<radius)
+                a.panic=Math.max(a.panic,84);
+        }
+    }
+
+    Actor targetAt(int x,int y,int tolerance,int fromX,int fromY,int dx,int dy) {
+        Actor best=null;
+        int nearest=999;
+        for (int i=0;i<street.length;i++) {
+            Actor a=street[i];
+            if (a.deferred || a.vehicle || a.hp<=0) continue;
+            int ax=a.x/UNIT,ay=a.y/UNIT;
+            int deltaX=absolute(ax-x),deltaY=absolute(ay-y);
+            if ((ax-fromX)*dx+(ay-fromY)*dy>0 && deltaX<=tolerance && deltaY<=tolerance &&
+                deltaX+deltaY<nearest) {
+                best=a; nearest=deltaX+deltaY;
+            }
+        }
+        return best;
+    }
+
+    void reportCrime(int level,boolean direct) {
+        if (!direct) {
+            for (int i=0;i<street.length;i++) {
+                Actor a=street[i];
+                if (a.role==Street.POLICE && !a.deferred && a.hp>0 &&
+                        distance(a,focusX(),focusY())<=150 &&
+                        canSee(a.x,a.y,focusX(),focusY())) { direct=true; break; }
+            }
+        }
+        if (direct) { wanted=Math.max(wanted,Math.min(3,level)); unseen=0; }
+    }
+
+    boolean onCamera(int x,int y) {
+        return absolute(x-cameraX)<147*UNIT && absolute(y-cameraY)<195*UNIT;
+    }
+
+    void respawn() {
+        driving=walking=false;
+        heroX=Street.HOSPITAL_X*UNIT;
+        heroY=Street.HOSPITAL_Y*UNIT;
+        heroDir=DOWN;
+        cameraX=heroX; cameraY=heroY;
+        velocityX=velocityY=wanted=unseen=caught=0;
+        lifeRevision++;
+        trade.job=-1; trade.jobTime=0;
+        trade.tell("Hospital recovery");
+    }
+
+    Actor garageVehicle(int model) {
+        for (int i=0;i<street.length;i++) {
+            Actor a=street[i];
+            if (a.role==Street.GARAGE && a.model==model) return a;
+        }
+        throw new IllegalStateException("Garage vehicle missing");
+    }
+
+    private int garageX() { return (Trade.GARAGE_X+65)*UNIT; }
+    private int garageY() { return (Trade.GARAGE_Y+25)*UNIT; }
+
+    boolean garageSpace(Actor a) {
+        return freeVehicle(a,garageX(),garageY(),RIGHT);
+    }
+
+    void deliverGarageVehicle(Actor a) {
+        a.claimed=true;
+        a.deferred=false;
+        a.x=garageX();
+        a.y=garageY();
+        a.dir=RIGHT;
+        velocityX=velocityY=0;
+    }
+
+    boolean vehicleSpace(Actor a,int x,int y,int dir) { return freeVehicle(a,x,y,dir); }
+    boolean pedestrianSpace(Actor a,int x,int y) { return freePedestrian(a,x,y); }
+    void emsWalk(Actor a,int x,int y) {
+        a.moving=false;
+        manoeuvre(a,x,y,1,345);
     }
 
     void offence() {
@@ -195,8 +324,8 @@ final class District {
     private boolean policeAtFeet() {
         for (int i = 0; i < street.length; i++) {
             Actor a = street[i];
-            if (!a.deferred && a.role == Street.POLICE && !a.vehicle && distance(a,heroX,heroY) <= 13 &&
-                visible(a.x,a.y,heroX,heroY)) return true;
+            if (!a.deferred && a.hp>0 && a.role == Street.POLICE && !a.vehicle && distance(a,heroX,heroY) <= 13 &&
+                canSee(a.x,a.y,heroX,heroY)) return true;
         }
         return false;
     }
@@ -205,7 +334,11 @@ final class District {
         return (absolute(a.x-x)+absolute(a.y-y))/UNIT;
     }
 
-    private boolean visible(int x, int y, int targetX, int targetY) {
+    boolean canHit(int x,int y,int targetX,int targetY) {
+        return pathClear(x,y,targetX,targetY,2,0);
+    }
+
+    boolean canSee(int x, int y, int targetX, int targetY) {
         return pathClear(x,y,targetX,targetY,8,0);
     }
 
@@ -287,11 +420,16 @@ final class District {
                 if (!other.deferred && other.role == Street.POLICE && other.vehicle &&
                     touch(x,y,halfWidth(car.dir,car.model),halfHeight(car.dir,car.model),
                           other.x,other.y,halfWidth(other.dir,other.model),halfHeight(other.dir,other.model))) {
-                    offence();
+                    reportCrime(1,true);
                     offenceCooldown = 90;
                     break;
                 }
             }
+        }
+        int shock = absolute(dx)+absolute(dy);
+        if (shock>290) {
+            car.hp=Math.max(0,car.hp-shock/126);
+            if (car.hp==0) combat.damage(this,35);
         }
         if (dx != 0) velocityX = 0;
         if (dy != 0) velocityY = 0;
@@ -323,15 +461,31 @@ final class District {
             patrol(actor, elapsed);
             return;
         }
+        if (actor.strike>0) actor.strike=Math.max(0,actor.strike-elapsed);
+        if (actor.hitPose>0) actor.hitPose=Math.max(0,actor.hitPose-elapsed);
+        if (actor.hit>0) {
+            actor.hit=Math.max(0,actor.hit-elapsed);
+            if (actor.hit>5) return;
+        }
+        if (actor.threat>0) actor.threat=Math.max(0,actor.threat-elapsed);
+        if (actor.panic>0) {
+            actor.panic=Math.max(0,actor.panic-elapsed);
+            int x=actor.x+(actor.x>focusX()?28:-28)*UNIT;
+            int y=actor.y+(actor.y>focusY()?28:-28)*UNIT;
+            manoeuvre(actor,x,y,elapsed,402);
+            actor.duty=Street.RETURN;
+            return;
+        }
         boolean police = actor.role == Street.POLICE;
         boolean gang = actor.role == Street.RED || actor.role == Street.IRON;
-        boolean hostile = police ? wanted > 0 : gang && story.gangAlert();
+        boolean hostile = police ? wanted > 0 : gang && (story.gangAlert() || actor.threat>0 || story.fight(actor.role));
         int homeDistance = (absolute(actor.x-actor.startX)+absolute(actor.y-actor.startY))/UNIT;
         if ((police || gang) && hostile && homeDistance < (police ? 205 : 88) &&
             distance < (police ? sightRange() : 70) &&
-            (actor.duty == Street.CHASE || visible(actor.x, actor.y, focusX(), focusY()))) {
+            (actor.duty == Street.CHASE || canSee(actor.x, actor.y, focusX(), focusY()))) {
             actor.duty = Street.CHASE;
-            manoeuvre(actor, focusX(), focusY(), elapsed, police ? (323+wanted*42) : 300);
+            if (gang && (actor.threat>0 || story.fight(actor.role))) combat.enemyAttack(this,actor,distance);
+            if (actor.hitPose<6) manoeuvre(actor, focusX(), focusY(), elapsed, police ? (323+wanted*42) : 300);
             return;
         }
         if (actor.duty == Street.CHASE || actor.duty == Street.RETURN) {
@@ -364,9 +518,12 @@ final class District {
     private boolean nearMovingVehicle(Actor pedestrian) {
         for (int i = 0; i < street.length; i++) {
             Actor a = street[i];
+            if (a.deferred || a.hp==0) continue;
             if (a.vehicle && (a.speed > 150 || (driving && a == car &&
                     absolute(velocityX)+absolute(velocityY) > 200)) &&
                     distance(a,pedestrian.x,pedestrian.y) < 29) return true;
+            if (pedestrian.role==Street.CIVILIAN && a.role==Street.POLICE && a.duty==Street.CHASE &&
+                    distance(a,pedestrian.x,pedestrian.y)<19) return true;
         }
         return false;
     }
@@ -459,7 +616,7 @@ final class District {
         int best = Integer.MAX_VALUE;
         for (int i = 0; i < street.length; i++) {
             Actor a = street[i];
-            if (!a.vehicle || a.deferred || a.role == Street.POLICE) continue;
+            if (!a.vehicle || a.deferred || a.role == Street.POLICE || a.role==Street.EMS) continue;
             int dx = absolute(a.x-heroX)/UNIT, dy = absolute(a.y-heroY)/UNIT;
             int score = dx*dx+dy*dy;
             if (score >= best || a.speed > 420 || dx > 48 || dy > 48) continue;
@@ -522,7 +679,7 @@ final class District {
     private boolean freeVehicle(Actor actor, int x, int y, int dir) {
         int model = actor.model;
         int xx = x / UNIT, yy = y / UNIT;
-        if (xx >= 0 && xx < width && yy >= 0 && yy < height && zones[(yy/16)*columns+xx/16] == SAND)
+        if (xx >= 0 && xx < width && yy >= 0 && yy < height && zoneAt(xx/16,yy/16) == SAND)
             return false;
         return clearActors(actor, xx, yy, halfWidth(dir, model), halfHeight(dir, model));
     }
@@ -532,7 +689,7 @@ final class District {
         if (self != null && !driving && touch(x, y, w, h, heroX, heroY, 4, 3)) return false;
         for (int i = 0; i < street.length; i++) {
             Actor other = street[i];
-            if (other == self || other.deferred) continue;
+            if (other == self || other.deferred || !other.vehicle && other.hp==0) continue;
             int ow = other.vehicle ? halfWidth(other.dir, other.model) : 4;
             int oh = other.vehicle ? halfHeight(other.dir, other.model) : 3;
             if (touch(x, y, w, h, other.x, other.y, ow, oh)) return false;
@@ -547,7 +704,7 @@ final class District {
     void deferObstructedSpawns() {
         for (int i = 0; i < street.length; i++) {
             Actor a = street[i];
-            if (!a.claimed && !spawnClear(a)) a.deferred = true;
+            if (!a.claimed && !a.deferred && !spawnClear(a)) a.deferred = true;
         }
     }
 
@@ -563,7 +720,7 @@ final class District {
         if (x < 0 || y < 0 || x + w > width || y + h > height) return false;
         for (int row = y/16; row <= (y+h-1)/16; row++) {
             for (int col = x/16; col <= (x+w-1)/16; col++) {
-                int zone = zones[row*columns+col];
+                int zone = zoneAt(col,row);
                 if (zone == WATER || zone == BLOCKED) return false;
             }
         }

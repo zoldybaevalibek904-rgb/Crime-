@@ -20,8 +20,8 @@ jobs:
       - run: tools/test-model.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: crime-district-alpha03
+          name: crime-district-alpha04
           path: |
-            dist/CrimeDistrict_Alpha03.jar
-            dist/CrimeDistrict_Alpha03.jad
+            dist/CrimeDistrict_Alpha04.jar
+            dist/CrimeDistrict_Alpha04.jad
           if-no-files-found: error

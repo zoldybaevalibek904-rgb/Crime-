@@ -4,10 +4,12 @@ import java.util.Vector;
 
 /** Fixed population and authored lane graphs. Actors keep their world positions off-screen. */
 final class Street {
-    static final int CIVILIAN = 0, PARKED = 1, POLICE = 2, RED = 3, IRON = 4, CONTACT = 5, CARGO = 6;
+    static final int CIVILIAN = 0, PARKED = 1, POLICE = 2, RED = 3, IRON = 4, CONTACT = 5, CARGO = 6, EMS = 7, MEDIC = 8, GARAGE = 9;
     static final int IDLE = 0, PATROL = 1, ALERT = 2, CHASE = 3, RETURN = 4;
     static final int RED_X = 1120, RED_Y = 443, IRON_X = 641, IRON_Y = 1147;
     static final int GUARD_X = 1224, GUARD_Y = 1314;
+    static final int HOSPITAL_X=1883,HOSPITAL_Y=172;
+    static final int LEGACY_POPULATION=44;
     static final int CARGO_X = 291, CARGO_Y = 985;
 
     static District.Actor[] populate() {
@@ -63,6 +65,28 @@ final class Street {
         walk(actors,25,POLICE,296,1219,2,loop(280,1217,453,1230));
         walk(actors,25,POLICE,1243,265,2,loop(1225,265,1260,278));
         add(actors,4,true,POLICE,1329,1032,District.DOWN,4,coast);
+
+        for (int by=0;by<4;by++) for (int bx=0;bx<4;bx++) {
+            if (bx<2 && by<2) continue;
+            int x=bx*768,y=by*704;
+            int[] local=lanes(x,y);
+            int model=by==3 && bx<2 ? 3 : (bx+by)%4;
+            add(actors,model,true,CIVILIAN,x+360,y+194,District.RIGHT,2,local);
+            if ((bx+by)%2==0)
+                add(actors,4,true,POLICE,x+561,y+380,District.DOWN,4,local);
+            walk(actors,by==1?13+(bx%6):1+(bx+by)%12,CIVILIAN,x+297,y+264,2,loop(x+269,y+264,x+480,y+272));
+            walk(actors,by==1?13+((bx+1)%6):7+(bx+by)%6,CIVILIAN,x+320,y+280,6,loop(x+280,y+276,x+490,y+280));
+        }
+        walk(actors,19,RED,2680,301,2,loop(2660,301,2733,312));
+        walk(actors,20,RED,2714,290,0,new int[]{2714,290});
+        walk(actors,21,RED,2755,304,0,new int[]{2755,304});
+        walk(actors,22,IRON,427,2410,2,loop(410,2410,477,2420));
+        walk(actors,23,IRON,456,2395,0,new int[]{456,2395});
+        walk(actors,24,IRON,469,2430,0,new int[]{469,2430});
+        walk(actors,26,CONTACT,1899,171,0,new int[]{1899,171});
+        car(actors,5,EMS,1874,228);
+        walk(actors,26,MEDIC,1890,247,0,new int[]{1890,247});
+        for(int i=0;i<4;i++) car(actors,i,GARAGE,Trade.GARAGE_X,Trade.GARAGE_Y+15);
 
         District.Actor[] result = new District.Actor[actors.size()];
         actors.copyInto(result);
