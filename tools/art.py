@@ -49,7 +49,7 @@ class Art:
 
 def terrain(tile):
     road = tile < 4 or 8 <= tile <= 13 or tile in (16, 17, 19)
-    a = Art(16, 16, "#413841" if road else "#997b73")
+    a = Art(16, 16, "#403941" if road else "#9b8177")
     if road:
         for i, (x, y) in enumerate(((1,2),(9,6),(4,12),(12,15),(14,3),(0,9),(7,0),(10,11))):
             a.rect((x + tile*3) % 15, (y + tile) % 16, 1 + i % 3, 1,
@@ -59,7 +59,10 @@ def terrain(tile):
         a.line([(0, 0), (0, 15)], "#694f52")
         a.line([(1, 1), (15, 1)], "#b59180")
         a.line([(1, 1), (1, 15)], "#ab897b")
-        a.line([(5, 10), (7, 10), (8, 11)], "#906f6a")
+        a.line([(5, 10), (7, 10), (8, 11)], "#8b716d")
+        a.rect(2, 14, 12, 1, "#95776f")
+        if tile in (5, 7):
+            a.line([(12,12),(14,12),(15,13)], "#89716e")
         a.rect(9 + tile % 4, 4 + tile % 3, 3, 1, "#a98977")
     if tile == 8:
         a.rect(0, 14, 16, 1, "#c29459")
@@ -71,10 +74,12 @@ def terrain(tile):
         for x in (2, 10):
             a.rect(x, 1, 4, 14, "#b6a096")
             a.rect(x, 14, 4, 1, "#87747c")
+            a.rect(x + 1, 6 + x % 3, 2, 1, "#a48e85")
     if tile == 11:
         for y in (2, 10):
             a.rect(1, y, 14, 4, "#b6a096")
             a.rect(14, y, 1, 4, "#87747c")
+            a.rect(6 + y % 3, y + 1, 1, 2, "#a48e85")
     if tile == 12:
         a.oval(3, 3, 11, 11, "#282530")
         a.oval(4, 4, 8, 8, "#5b5056")
@@ -101,7 +106,7 @@ def terrain(tile):
         edges = tile - 24
         for i, (x,y,w,h) in enumerate(((0,0,16,3),(0,13,16,3),(0,0,3,16),(13,0,3,16))):
             if edges & (1 << i):
-                a.rect(x,y,w,h,"#c29b87")
+                a.rect(x,y,w,h,"#c5aa95")
                 a.rect(x + (w == 3 and x > 0)*2, y + (h == 3 and y > 0)*2,
                        1 if w == 3 else w, 1 if h == 3 else h,"#58434b")
     return a.image
@@ -320,7 +325,7 @@ def walker_frame(row, frame):
             a.rect(x-1,18,5,y-16,INK)
             a.rect(x,19,3,y-18,color)
             a.rect(x,y,5,2,INK)
-            a.rect(x,y,4,1,"#bbb1a3")
+            a.rect(x,y,4,1,"#73717b")
         a.poly([(8,11),(14,10),(16,13),(15,20),(8,20),(7,16)],INK)
         a.rect(9,12,6,7,"#434651")
         a.rect(14,13,1,6,"#b6a497")
@@ -340,7 +345,7 @@ def walker_frame(row, frame):
         a.rect(x,19,4,y-18,"#44536b")
         a.rect(x,20,1,max(1,y-20),"#667189")
         a.rect(x-1,y,6,2,INK)
-        a.rect(x,y,4,1,"#d0bfb1")
+        a.rect(x,y,4,1,"#73717b")
     a.poly([(9,10),(15,10),(18,13),(17,19),(7,19),(6,14)],INK)
     a.rect(8,12,8,6,"#42444f")
     a.rect(8,12,2,5,"#5e5b68")
@@ -414,6 +419,175 @@ def car_frame(row):
         a.rect(x,6,3,2,"#ffe0a1" if row == 0 else "#c75f55")
         a.rect(x,36,3,2,"#c75f55" if row == 0 else "#ffe0a1")
     a.rect(20,38,4,1,"#a4a5ad")
+    return a.image
+
+
+def pedestrian_frame(model, row, frame):
+    source = walker_frame(row, frame)
+    art = Art(24,30)
+    profile = row >= 2
+    left = row == 2
+
+    def xside(x):
+        return 23-x if left else x
+
+    def shape(points, color):
+        art.poly([(xside(x),y) for x,y in points],color)
+
+    colors = {
+        1: {"#42444f":"#694939","#434651":"#694939","#5e5b68":"#916750",
+            "#545460":"#845940","#626071":"#986b51","#44536b":"#413940",
+            "#57647a":"#4c4147","#344252":"#342d35","#667189":"#625056",
+            "#73717b":"#998378"},
+        2: {"#42444f":"#8d8483","#434651":"#8d8483","#5e5b68":"#b5a196",
+            "#545460":"#98908c","#626071":"#b4a398","#64616d":"#bca99b",
+            "#d9c5ad":"#ae9e97","#b6a497":"#c8b3a1","#a99083":"#776b71"},
+        3: {"#42444f":"#873c3e","#434651":"#873c3e","#5e5b68":"#aa574d",
+            "#545460":"#934847","#626071":"#aa574d","#64616d":"#a0534c",
+            "#d9c5ad":"#9b4543","#a99083":"#6e303b","#b6a497":"#b56155",
+            "#44536b":"#bf8667","#57647a":"#c98d70","#344252":"#a2695b",
+            "#667189":"#d89e79","#73717b":"#dec4ab"}
+    }[model]
+    palette = {tuple(bytes.fromhex(k[1:])) + (255,): tuple(bytes.fromhex(v[1:])) + (255,)
+               for k,v in colors.items()}
+    source.putdata([palette.get(pixel,pixel) for pixel in source.getdata()])
+    art.image.paste(source)
+
+    if model == 1:
+        if profile:
+            shape([(8,6),(8,4),(10,2),(14,2),(16,4),(16,6),(19,7),(19,8),(13,8),(8,7)],INK)
+            shape([(9,4),(11,3),(14,3),(15,5),(11,5),(9,6)],"#70656a")
+            shape([(9,6),(14,5),(18,7),(14,7),(10,7)],"#49505d")
+        else:
+            art.poly([(7,7),(7,5),(9,2),(15,2),(17,4),(18,7),(16,9),(8,9)],INK)
+            art.poly([(8,6),(10,3),(14,3),(16,5),(16,6),(9,7)],"#67646b")
+            art.rect(10,3,4,1,"#92817a")
+            art.rect(8 if row == 1 else 9,7,9 if row == 1 else 7,1,"#46434e")
+    elif model == 2:
+        if profile:
+            shape([(7,10),(9,9),(10,12),(14,12),(13,14),(9,13),(7,12)],"#5b525a")
+            shape([(8,10),(10,11),(12,12),(10,12),(8,11)],"#c0ac9d")
+        elif row == 0:
+            art.poly([(8,10),(10,12),(15,12),(17,10),(16,14),(12,16),(8,13)],"#564f59")
+            art.poly([(9,11),(11,13),(15,12),(14,14),(12,15),(10,13)],"#ac9c94")
+        else:
+            art.rect(9,11,7,1,"#554950")
+            for x in (10,14):
+                art.rect(x,12,1,4,"#dfc5ad")
+    elif profile:
+        shape([(8,5),(10,6),(10,10),(12,13),(11,16),(8,15),(6,13),(6,8)],INK)
+        shape([(8,7),(9,8),(9,12),(10,15),(8,14),(7,12),(7,9)],"#4e383e")
+        shape([(8,18),(15,18),(15,21),(9,21)],"#333543")
+        shape([(9,19),(14,19),(14,20),(9,20)],"#525467")
+    else:
+        art.poly([(8,5),(9,9),(10,13),(9,16),(6,16),(6,12),(7,8)],INK)
+        art.poly([(16,5),(17,8),(18,12),(18,16),(15,16),(14,12),(15,9)],INK)
+        art.line([(8,8),(7,12),(7,14)],"#513740")
+        art.line([(16,8),(17,12),(17,14)],"#513740")
+        if row == 0:
+            art.poly([(9,4),(14,4),(16,8),(16,13),(14,15),(10,15),(8,12),(8,8)],"#382c35")
+            art.line([(10,6),(10,11),(11,13)],"#5e4448")
+        art.rect(8,18,9,4,"#323440")
+        art.rect(9,19,7,1,"#545569")
+    return art.image
+
+
+def taxi_frame(row):
+    art = Art(48,48)
+    source = car_frame(row)
+    colors = {
+        "555c73":"a47343","515b73":"b48045","727b96":"d4a75c","747f96":"d4a75c",
+        "a2a4b2":"ebc882","a0a4b4":"ebc882","9197ad":"c89146","9392a2":"efbc68",
+        "9b9aa9":"e1ab60","777e96":"a46c38","81849b":"d6a456","a3a0aa":"e1ac64"
+    }
+    palette = {tuple(bytes.fromhex(k))+(255,): tuple(bytes.fromhex(v))+(255,)
+               for k,v in colors.items()}
+    source.putdata([palette.get(pixel,pixel) for pixel in source.getdata()])
+    art.image.paste(source,(2,2))
+    if row >= 2:
+        for x in range(8,40):
+            art.rect(x,25+(x%2),1,1,"#3c3034")
+        y = 12
+    else:
+        for i in range(11):
+            art.rect(17+i,34+i%2,1,1,"#493536")
+        y = 21
+    art.rect(15,y,17,8,INK)
+    art.rect(16,y+1,15,6,"#e1be81")
+    # Four tiny roof letters are fixed to the camera and remain readable from every heading.
+    for col, letter in enumerate(((7,2,2,2,2),(2,5,7,5,5),(5,5,2,5,5),(7,2,2,2,7))):
+        for dy, mask in enumerate(letter):
+            for dx in range(3):
+                if mask & (4 >> dx):
+                    art.rect(16+col*4+dx,y+1+dy,1,1,"#423034")
+    return art.image
+
+
+def utility_frame(row, van):
+    a = Art(48,48)
+    body, light, dark = (("#9e938d","#caafa0","#796d6d") if van
+                         else ("#59535a","#82747a","#403b46"))
+    roof = "#cdc0ad" if van else "#635a62"
+    if row >= 2:
+        a.oval(1,17,46,17,(28,24,33,130))
+        for x in (6,32):
+            a.oval(x,24,10,10,INK)
+            a.oval(x+2,26,6,6,"#6f6069")
+            a.rect(x+4,28,2,2,"#aa998e")
+        a.poly([(1,12),(4,9),(24,9),(30,12),(35,15),(43,16),(46,19),
+                (46,27),(43,30),(4,30),(1,27)],INK)
+        a.poly([(2,13),(5,10),(24,10),(29,13),(34,16),(43,17),(45,20),
+                (45,26),(42,28),(4,28),(2,26)],body)
+        a.poly([(5,10),(24,10),(29,13),(31,16),(5,16)],roof)
+        a.line([(5,10),(24,10),(28,12)],light)
+        a.poly([(25,12),(28,13),(34,17),(30,20),(26,17)],"#333642")
+        a.line([(28,14),(31,17),(30,18)],"#62707d")
+        a.rect(8,18,17,5,dark if van else "#292a36")
+        if not van:
+            a.rect(15,18,2,5,body)
+            a.rect(7,12,14,1,light)
+            a.rect(7,15,14,1,dark)
+        else:
+            a.rect(7,12,15,1,"#b3a297")
+            a.rect(7,14,15,1,"#ac9d91")
+        a.poly([(26,18),(29,20),(28,23),(25,23),(25,19)],"#2e303d")
+        a.line([(4,24),(41,24),(44,22)],light)
+        a.line([(5,27),(43,27)],dark)
+        for x in (8,25,32):
+            a.rect(x,23,1,4,dark)
+        a.rect(27,25,3,1,light)
+        a.rect(43,20,2,3,"#efd09b")
+        a.rect(2,21,2,4,"#a54e48")
+        return a.image if row == 3 else a.image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    a.oval(11,3,26,44,(28,24,33,130))
+    for x in (12,30):
+        for y in (7,32):
+            a.rect(x,y,6,9,INK)
+    a.poly([(12,7),(15,3),(31,3),(35,7),(35,41),(31,45),(16,45),(12,41)],INK)
+    a.poly([(13,8),(16,5),(31,5),(34,8),(34,40),(31,43),(16,43),(13,40)],body)
+    a.rect(14,9,1,28,light)
+    a.rect(32,9,1,28,dark)
+    upper = row == 0
+    top = 17 if upper else 9
+    a.rect(16,top,16,22,roof)
+    a.rect(16,top,16,1,light)
+    for x in (18,22,27,30):
+        a.rect(x,top+3,1,14,light if not van else "#b4a397")
+    win = 11 if upper else 32
+    a.poly([(16,win),(31,win),(32,win+4),(29,win+6),(18,win+6),(15,win+4)],"#303442")
+    a.line([(17,win+1),(29,win+1)],"#65717e")
+    if van:
+        a.rect(23,39 if upper else 6,1,4,dark)
+    elif upper:
+        a.oval(20,37,8,6,INK)
+        a.oval(22,38,4,4,dark)
+    else:
+        a.oval(20,4,8,6,INK)
+        a.oval(22,5,4,4,dark)
+    for x in (15,29):
+        a.rect(x,7,3,2,"#f6d7a0" if upper else "#a84d4c")
+        a.rect(x,39,3,2,"#a84d4c" if upper else "#f6d7a0")
+    a.rect(21,42,6,1,light)
     return a.image
 
 
@@ -514,4 +688,15 @@ if __name__ == "__main__":
         sedan.image.paste(car_frame(row),(row*44,0))
     walker.save("walker")
     sedan.save("sedan")
+    traffic = Art(192,144)
+    for row in range(4):
+        for model, frame in enumerate((taxi_frame(row), utility_frame(row, False), utility_frame(row, True))):
+            traffic.image.paste(frame,(row*48,model*48))
+    traffic.save("traffic")
+    for model in range(1,4):
+        pedestrian = Art(120,120)
+        for row in range(4):
+            for frame in range(5):
+                pedestrian.image.paste(pedestrian_frame(model,row,frame),(frame*24,row*30))
+        pedestrian.save(f"pedestrian{model}")
     downtown()

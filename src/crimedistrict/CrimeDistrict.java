@@ -30,7 +30,11 @@ public final class CrimeDistrict extends MIDlet {
         private final Font headline = Font.getFont(Font.FACE_SYSTEM, Font.STYLE_BOLD, Font.SIZE_LARGE);
         private final Image[] props = new Image[16];
         private District city;
-        private Image tiles, walker, sedan;
+        private Image tiles, sedan, traffic;
+        private final Image[] walkers = new Image[4];
+        private int[] drawOrder;
+        private int[] drawDepth;
+        private static final int HERO = -2, SEDAN = -1;
         private volatile boolean active, closed;
         private Thread loop;
         private int state, selection, held, pressed;
@@ -40,8 +44,14 @@ public final class CrimeDistrict extends MIDlet {
             setFullScreenMode(true);
             try {
                 city = new District(getClass().getResourceAsStream("/downtown.bin"));
+                drawOrder = new int[city.street.length + 2];
+                drawDepth = new int[drawOrder.length];
                 tiles = Image.createImage("/tiles.png");
-                walker = Image.createImage("/walker.png");
+                walkers[0] = Image.createImage("/walker.png");
+                for (int i = 1; i < walkers.length; i++) {
+                    walkers[i] = Image.createImage("/pedestrian" + i + ".png");
+                }
+                traffic = Image.createImage("/traffic.png");
                 sedan = Image.createImage("/sedan.png");
                 for (int i = 0; i < props.length; i++) props[i] = Image.createImage("/prop" + i + ".png");
             } catch (IOException failure) {
@@ -103,6 +113,10 @@ public final class CrimeDistrict extends MIDlet {
         }
 
         protected synchronized void keyReleased(int code) { held &= ~keyBit(code); }
+
+        protected synchronized void keyRepeated(int code) {
+            if (active) held |= keyBit(code) & (UP | DOWN | LEFT | RIGHT);
+        }
 
         public void run() {
             Graphics graphics = getGraphics();
@@ -209,33 +223,38 @@ public final class CrimeDistrict extends MIDlet {
                 District.Prop prop = city.props[i];
                 if (prop.width == 0) drawProp(g, prop, sx, sy, w, h);
             }
-            int heroY = city.heroY / District.UNIT;
-            int carY = city.carY / District.UNIT;
-            int carDepth = carY + District.carHalfHeight(city.carDir);
-            boolean heroDrawn = city.driving, carDrawn = false;
-            for (int i = 0; i <= city.props.length; i++) {
-                District.Prop prop = i < city.props.length ? city.props[i] : null;
-                int depth = prop == null ? Integer.MAX_VALUE : prop.depth;
-                if (!heroDrawn && heroY + 3 <= depth && (carDrawn || heroY + 3 <= carDepth)) {
-                    drawHero(g, sx, sy);
-                    heroDrawn = true;
+            int visible = 0;
+            if (!city.driving && visibleActor(city.heroX, city.heroY, sx, sy, w, h)) {
+                insertActor(visible++, HERO, city.heroY / District.UNIT + 3);
+            }
+            if (visibleActor(city.carX, city.carY, sx, sy, w, h)) {
+                insertActor(visible++, SEDAN, city.carY / District.UNIT + District.carHalfHeight(city.carDir));
+            }
+            for (int i = 0; i < city.street.length; i++) {
+                District.Actor actor = city.street[i];
+                if (visibleActor(actor.x, actor.y, sx, sy, w, h)) {
+                    int foot = actor.vehicle ? District.halfHeight(actor.dir, actor.model) : 3;
+                    insertActor(visible++, i, actor.y / District.UNIT + foot);
                 }
-                if (!carDrawn && carDepth <= depth) {
-                    region(g, sedan, city.carDir * 44, 0, 44, 44,
-                           city.carX / District.UNIT - sx - 22, carY - sy - 22);
-                    carDrawn = true;
+            }
+            int actor = 0;
+            for (int i = 0; i < city.props.length; i++) {
+                District.Prop prop = city.props[i];
+                if (prop.width == 0) continue;
+                while (actor < visible && drawDepth[actor] <= prop.depth) {
+                    drawActor(g, drawOrder[actor++], sx, sy);
                 }
-                if (!heroDrawn && heroY + 3 <= depth) {
-                    drawHero(g, sx, sy);
-                    heroDrawn = true;
-                }
-                if (prop != null && prop.width > 0) drawProp(g, prop, sx, sy, w, h);
+                drawProp(g, prop, sx, sy, w, h);
+            }
+            while (actor < visible) drawActor(g, drawOrder[actor++], sx, sy);
+            if (state == PLAY && city.mission != District.COMPLETE) {
+                drawTarget(g, city.targetX() - sx, city.targetY() - sy, w, h);
             }
             if (state == PLAY && !city.driving && city.nearCar()) {
                 int x = city.carX / District.UNIT - sx;
-                int y = carY - sy - 61;
+                int y = city.carY / District.UNIT - sy - 61;
                 x = Math.max(58, Math.min(w - 58, x));
-                y = Math.max(35, y);
+                y = Math.max(56, y);
                 panel(g, x - 57, y, 114, 20, 0x25232b);
                 text(g, "5  ENTER VEHICLE", x, y + 2, true, 0xffe0aa);
                 g.fillTriangle(x - 4, y + 21, x + 4, y + 21, x, y + 25);
@@ -250,10 +269,70 @@ public final class CrimeDistrict extends MIDlet {
             }
         }
 
-        private void drawHero(Graphics g, int sx, int sy) {
-            int frame = city.walking ? 1 + city.stride / 6 : 0;
-            region(g, walker, frame * 24, city.heroDir * 30, 24, 30,
-                   city.heroX / District.UNIT - sx - 12, city.heroY / District.UNIT - sy - 25);
+        private boolean visibleActor(int fx, int fy, int sx, int sy, int w, int h) {
+            int x = fx / District.UNIT - sx, y = fy / District.UNIT - sy;
+            return x >= -24 && y >= -24 && x < w + 24 && y < h + 30;
+        }
+
+        private void insertActor(int slot, int actor, int depth) {
+            while (slot > 0 && drawDepth[slot - 1] > depth) {
+                drawOrder[slot] = drawOrder[slot - 1];
+                drawDepth[slot] = drawDepth[slot - 1];
+                slot--;
+            }
+            drawOrder[slot] = actor;
+            drawDepth[slot] = depth;
+        }
+
+        private void drawActor(Graphics g, int id, int sx, int sy) {
+            if (id == HERO) {
+                drawWalker(g, 0, city.heroDir, city.walking ? 1 + city.stride / 6 : 0,
+                           city.heroX / District.UNIT - sx, city.heroY / District.UNIT - sy);
+            } else if (id == SEDAN) {
+                region(g, sedan, city.carDir * 44, 0, 44, 44, city.carX / District.UNIT - sx - 22,
+                       city.carY / District.UNIT - sy - 22);
+            } else {
+                District.Actor actor = city.street[id];
+                int x = actor.x / District.UNIT - sx, y = actor.y / District.UNIT - sy;
+                if (actor.vehicle) {
+                    region(g, traffic, actor.dir * 48, (actor.model - 1) * 48, 48, 48, x - 24, y - 24);
+                } else {
+                    drawWalker(g, actor.model, actor.dir, actor.moving ? 1 + actor.stride / 8 : 0, x, y);
+                }
+            }
+        }
+
+        private void drawWalker(Graphics g, int model, int direction, int frame, int x, int y) {
+            region(g, walkers[model], frame * 24, direction * 30, 24, 30, x - 12, y - 25);
+        }
+
+        private void drawTarget(Graphics g, int x, int y, int w, int h) {
+            int margin = 12, top = 58, bottom = h - 35;
+            if (x >= margin && x <= w - margin && y >= top && y <= bottom) {
+                g.setColor(0x28252e);
+                g.drawArc(x - 11, y - 6, 22, 12, 0, 360);
+                g.setColor(0xf0b870);
+                g.drawArc(x - 10, y - 5, 20, 10, 0, 360);
+                g.fillTriangle(x - 5, y - 17, x + 5, y - 17, x, y - 10);
+                return;
+            }
+            int cx = w / 2, cy = (top + bottom) / 2;
+            int dx = x - cx, dy = y - cy;
+            int sx = (w / 2 - margin) * 1024 / Math.max(1, Math.abs(dx));
+            int sy = (bottom - cy) * 1024 / Math.max(1, Math.abs(dy));
+            int scale = Math.min(sx, sy);
+            int tipX = cx + dx * scale / 1024;
+            int tipY = cy + dy * scale / 1024;
+            int axisX = sx <= sy ? (dx < 0 ? -1 : 1) : 0;
+            int axisY = sx > sy ? (dy < 0 ? -1 : 1) : 0;
+            arrow(g, tipX, tipY, axisX, axisY, 10, 7, 0x28252e);
+            arrow(g, tipX, tipY, axisX, axisY, 8, 5, 0xf0b870);
+        }
+
+        private void arrow(Graphics g, int x, int y, int dx, int dy, int length, int width, int color) {
+            g.setColor(color);
+            g.fillTriangle(x, y, x - dx*length + dy*width, y - dy*length + dx*width,
+                           x - dx*length - dy*width, y - dy*length - dx*width);
         }
 
         private void drawHud(Graphics g, int w, int h) {
@@ -262,9 +341,21 @@ public final class CrimeDistrict extends MIDlet {
             text(g, "DOWNTOWN", 17, 10, false, 0xffe0aa);
             panel(g, 8, h - 24, 49, 17, 0x25232b);
             text(g, "MENU", 32, h - 24, true, 0xe8d3b8);
+            if (city.mission != District.COMPLETE || city.celebration > 0) {
+                String title = city.mission == District.COMPLETE ? "DELIVERY COMPLETE" : "FIRST DELIVERY";
+                String task = city.mission == District.TO_PICKUP ? "Walk to pickup" :
+                              city.mission == District.TO_DELIVERY ? "Drive to drop-off" : "Free roam";
+                int boardWidth = Math.min(123, w - 16);
+                int bx = w - boardWidth - 8;
+                int by = w >= 236 ? 8 : 31;
+                panel(g, bx, by, boardWidth, 36, 0x25232b);
+                text(g, title, bx + boardWidth / 2, by + 3, true, 0xffe0aa);
+                text(g, task, bx + boardWidth / 2, by + 18, true, 0xcdb3a3);
+            }
             if (city.driving) {
-                panel(g, w - 105, h - 24, 97, 17, 0x25232b);
-                text(g, "5  EXIT VEHICLE", w - 56, h - 24, true, 0xe8d3b8);
+                panel(g, w - 113, h - 24, 105, 17, 0x25232b);
+                text(g, city.canLeaveCar() ? "5  EXIT VEHICLE" : "STOP TO EXIT",
+                     w - 60, h - 24, true, 0xe8d3b8);
             }
         }
 
@@ -275,7 +366,7 @@ public final class CrimeDistrict extends MIDlet {
             g.setFont(headline);
             text(g, state == TITLE ? "CRIME DISTRICT" : "PAUSED", center, y + 12, true, 0xffe0aa);
             g.setFont(label);
-            text(g, state == TITLE ? "DOWNTOWN  /  ALPHA 0.1" : "DOWNTOWN",
+            text(g, state == TITLE ? "DOWNTOWN  /  ALPHA 0.2" : "DOWNTOWN",
                  center, y + 41, true, 0xc8a58c);
             for (int i = 0; i < 2; i++) {
                 int line = y + 65 + i * 25;

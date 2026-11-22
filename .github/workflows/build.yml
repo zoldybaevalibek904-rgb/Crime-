@@ -19,8 +19,8 @@ jobs:
       - run: tools/build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: crime-district-alpha01
+          name: crime-district-alpha02
           path: |
-            dist/CrimeDistrict_Alpha01.jar
-            dist/CrimeDistrict_Alpha01.jad
+            dist/CrimeDistrict_Alpha02.jar
+            dist/CrimeDistrict_Alpha02.jad
           if-no-files-found: error
