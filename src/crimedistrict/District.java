@@ -62,7 +62,7 @@ final class District {
         carY = 229 * UNIT;
         heroDir = DOWN;
         carDir = RIGHT;
-        walking = driving = false;
+        walking = driving = steered = false;
         speed = stride = 0;
         cameraX = heroX;
         cameraY = heroY;
@@ -104,8 +104,9 @@ final class District {
     }
 
     private void drive(boolean up, boolean down, boolean left, boolean right) {
-        // Steering snaps one quarter-turn. Holding a button still permits a later turn.
-        if (left != right && steerCooldown == 0) {
+        // One quarter-turn per press, as soon as there is room to turn.
+        if (left == right) steered = false;
+        if (left != right && !steered) {
             int next;
             if (carDir == UP) next = left ? LEFT : RIGHT;
             else if (carDir == DOWN) next = left ? RIGHT : LEFT;
@@ -113,10 +114,9 @@ final class District {
             else next = left ? UP : DOWN;
             if (freeCar(carX, carY, next)) {
                 carDir = next;
-                steerCooldown = 13;
+                steered = true;
             }
         }
-        if (steerCooldown > 0) steerCooldown--;
         if (up && !down) {
             speed = Math.min(CAR_SPEED, speed + (speed < 0 ? 100 : 36));
         } else if (down && !up) {
@@ -136,7 +136,7 @@ final class District {
         }
     }
 
-    private int steerCooldown;
+    private boolean steered;
 
     boolean nearCar() {
         return absolute(heroX - carX) <= (carHalfWidth(carDir) + 23) * UNIT
@@ -167,7 +167,8 @@ final class District {
             heroY = bestY;
             heroDir = bestDirection;
             driving = false;
-            steerCooldown = speed = stride = 0;
+            steered = false;
+            speed = stride = 0;
         }
     }
 

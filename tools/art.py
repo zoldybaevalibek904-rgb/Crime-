@@ -1,13 +1,12 @@
 """Original pixel art and Downtown layout. Pillow is only needed to edit/regenerate art."""
 from pathlib import Path
 from struct import pack
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1] / "res"
 ROOT.mkdir(exist_ok=True)
 INK = "#211d26"
 PAPER = "#edc6a0"
-FONT = ImageFont.load_default(size=10)
 PIXEL_FONT = {
     "A": (2,5,7,5,5), "B": (6,5,6,5,6), "C": (3,4,4,4,3),
     "D": (6,5,5,5,6), "E": (7,4,6,4,7), "F": (7,4,6,4,4),
@@ -61,7 +60,7 @@ def terrain(tile):
         a.line([(1, 1), (15, 1)], "#b59180")
         a.line([(1, 1), (1, 15)], "#ab897b")
         a.line([(5, 10), (7, 10), (8, 11)], "#906f6a")
-        a.rect(11, 4, 3, 1, "#a98977")
+        a.rect(9 + tile % 4, 4 + tile % 3, 3, 1, "#a98977")
     if tile == 8:
         a.rect(0, 14, 16, 1, "#c29459")
         a.rect(0, 11, 16, 1, "#a47650")
@@ -313,10 +312,11 @@ def walker_frame(row, frame):
     a = Art(24,30)
     a.oval(4,22,17,7,(30,22,33,113))
     step = (0, -2, 0, 2, 0)[frame]
+    passing = (0, 0, -1, 0, 1)[frame]
     profile = row >= 2
     back = row == 0
     if profile:
-        for x, y, color in ((10-step,23,"#344252"),(10+step,25,"#57647a")):
+        for x, y, color in ((10-step-passing,23,"#344252"),(10+step+passing,25,"#57647a")):
             a.rect(x-1,18,5,y-16,INK)
             a.rect(x,19,3,y-18,color)
             a.rect(x,y,5,2,INK)
@@ -324,7 +324,7 @@ def walker_frame(row, frame):
         a.poly([(8,11),(14,10),(16,13),(15,20),(8,20),(7,16)],INK)
         a.rect(9,12,6,7,"#434651")
         a.rect(14,13,1,6,"#b6a497")
-        arm = 10-step
+        arm = 10-step+passing
         a.rect(arm-1,13,4,7,INK)
         a.rect(arm,14,2,4,"#626071")
         a.rect(arm,18,2,2,"#b88060")
@@ -334,7 +334,7 @@ def walker_frame(row, frame):
         a.poly([(8,5),(10,3),(14,3),(16,5),(14,5),(12,6),(11,9),(9,10),(8,8)],"#292631")
         a.rect(10,4,4,1,"#51434d")
         return a.image if row == 3 else a.image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-    for x, shift in ((8,step),(13,-step)):
+    for x, shift in ((8,step+passing),(13,-step-passing)):
         y = 25+shift
         a.rect(x-1,18,6,y-17,INK)
         a.rect(x,19,4,y-18,"#44536b")
@@ -428,7 +428,7 @@ def downtown():
     tiles = []
     for y in range(rows):
         for x in range(cols):
-            tile = 4
+            tile = 4 + (x*3 + y*7) % 4
             if road(x,y):
                 tile = (x*3+y*7)%4
                 vx = next((strip for strip in vertical if x in strip), None)
@@ -448,7 +448,7 @@ def downtown():
                     tile = 24+mask
                 elif (x in (18,28) and 18 <= y <= 26) or (38 <= x <= 45 and y in (17,27)):
                     tile = 18
-                elif y in (5,27,40):
+                elif (y == 4 and 16 <= x <= 31) or (26 <= x <= 27 and 5 <= y <= 10) or (y == 27 and 17 <= x <= 30) or (y == 40 and 38 <= x <= 46):
                     tile = 19
             tiles.append(tile)
 
@@ -459,7 +459,7 @@ def downtown():
         add(kind,x,y,3,17,w-4,h-16)
 
     house(0,21,62,126,86)
-    house(1,267,76,137,85)
+    house(1,256,76,137,85)
     house(5,425,89,72,57)
     house(3,606,49,141,99)
     house(2,28,270,113,78)

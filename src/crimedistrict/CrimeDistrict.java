@@ -205,6 +205,10 @@ public final class CrimeDistrict extends MIDlet {
                     region(g, tiles, tile % 8 * 16, tile / 8 * 16, 16, 16, col * 16 - sx, row * 16 - sy);
                 }
             }
+            for (int i = 0; i < city.props.length; i++) {
+                District.Prop prop = city.props[i];
+                if (prop.width == 0) drawProp(g, prop, sx, sy, w, h);
+            }
             int heroY = city.heroY / District.UNIT;
             int carY = city.carY / District.UNIT;
             int carDepth = carY + District.carHalfHeight(city.carDir);
@@ -225,22 +229,24 @@ public final class CrimeDistrict extends MIDlet {
                     drawHero(g, sx, sy);
                     heroDrawn = true;
                 }
-                if (prop != null) {
-                    Image art = props[prop.art];
-                    int x = prop.x - sx, y = prop.y - sy;
-                    if (x < w && y < h && x + art.getWidth() > 0 && y + art.getHeight() > 0) {
-                        g.drawImage(art, x, y, TOP_LEFT);
-                    }
-                }
+                if (prop != null && prop.width > 0) drawProp(g, prop, sx, sy, w, h);
             }
             if (state == PLAY && !city.driving && city.nearCar()) {
                 int x = city.carX / District.UNIT - sx;
-                int y = carY - sy - 37;
+                int y = carY - sy - 61;
                 x = Math.max(58, Math.min(w - 58, x));
                 y = Math.max(35, y);
                 panel(g, x - 57, y, 114, 20, 0x25232b);
                 text(g, "5  ENTER VEHICLE", x, y + 2, true, 0xffe0aa);
                 g.fillTriangle(x - 4, y + 21, x + 4, y + 21, x, y + 25);
+            }
+        }
+
+        private void drawProp(Graphics g, District.Prop prop, int sx, int sy, int w, int h) {
+            Image art = props[prop.art];
+            int x = prop.x - sx, y = prop.y - sy;
+            if (x < w && y < h && x + art.getWidth() > 0 && y + art.getHeight() > 0) {
+                g.drawImage(art, x, y, TOP_LEFT);
             }
         }
 
