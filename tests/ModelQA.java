@@ -23,7 +23,7 @@ public class ModelQA {
 
     public static void main(String[] args) throws Exception {
         District d = new District(ModelQA.class.getResourceAsStream("/downtown.bin"));
-        int[][] turnMasks = new int[6][4];
+        int[][] turnMasks = new int[d.street.length][4];
         for(int t=0;t<14400;t++) {
             frame(d, 0);
             for(int i=0;i<d.street.length;i++) {

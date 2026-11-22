@@ -31,7 +31,7 @@ public final class CrimeDistrict extends MIDlet {
         private final Image[] props = new Image[16];
         private District city;
         private Image tiles, sedan, traffic;
-        private final Image[] walkers = new Image[4];
+        private final Image[] walkers = new Image[District.PEDESTRIAN_MODELS + 1];
         private int[] drawOrder;
         private int[] drawDepth;
         private static final int HERO = -2, SEDAN = -1;
@@ -286,7 +286,7 @@ public final class CrimeDistrict extends MIDlet {
 
         private void drawActor(Graphics g, int id, int sx, int sy) {
             if (id == HERO) {
-                drawWalker(g, 0, city.heroDir, city.walking ? 1 + city.stride / 6 : 0,
+                drawWalker(g, 0, city.heroDir, city.walking ? walkFrame(city.stride / 6) : 0,
                            city.heroX / District.UNIT - sx, city.heroY / District.UNIT - sy);
             } else if (id == SEDAN) {
                 region(g, sedan, city.carDir * 44, 0, 44, 44, city.carX / District.UNIT - sx - 22,
@@ -297,13 +297,18 @@ public final class CrimeDistrict extends MIDlet {
                 if (actor.vehicle) {
                     region(g, traffic, actor.dir * 48, (actor.model - 1) * 48, 48, 48, x - 24, y - 24);
                 } else {
-                    drawWalker(g, actor.model, actor.dir, actor.moving ? 1 + actor.stride / 8 : 0, x, y);
+                    drawWalker(g, actor.model, actor.dir, actor.moving ? walkFrame(actor.stride / 8) : 0, x, y);
                 }
             }
         }
 
+        private int walkFrame(int phase) {
+            // The authored passing pose B connects both contact poses.
+            return phase == 3 ? 2 : 1 + phase;
+        }
+
         private void drawWalker(Graphics g, int model, int direction, int frame, int x, int y) {
-            region(g, walkers[model], frame * 24, direction * 30, 24, 30, x - 12, y - 25);
+            region(g, walkers[model], frame * 24, direction * 36, 24, 36, x - 12, y - 31);
         }
 
         private void drawTarget(Graphics g, int x, int y, int w, int h) {
@@ -366,7 +371,7 @@ public final class CrimeDistrict extends MIDlet {
             g.setFont(headline);
             text(g, state == TITLE ? "CRIME DISTRICT" : "PAUSED", center, y + 12, true, 0xffe0aa);
             g.setFont(label);
-            text(g, state == TITLE ? "DOWNTOWN  /  ALPHA 0.2" : "DOWNTOWN",
+            text(g, state == TITLE ? "DOWNTOWN  /  ALPHA 0.2.1" : "DOWNTOWN",
                  center, y + 41, true, 0xc8a58c);
             for (int i = 0; i < 2; i++) {
                 int line = y + 65 + i * 25;

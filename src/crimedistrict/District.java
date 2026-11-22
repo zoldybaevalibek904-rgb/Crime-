@@ -12,6 +12,7 @@ final class District {
     static final int UNIT = 256;
     static final int HERO_SPEED = 360;
     static final int CAR_SPEED = 920;
+    static final int PEDESTRIAN_MODELS = 6;
     private static final int ACCELERATION = 64;
     private static final int BRAKE = 106;
     private static final int[] PICKUP = {274, 257};
@@ -23,8 +24,12 @@ final class District {
         {306, 173, 452, 173, 452, 158, 444, 158, 444, 173},
         {306, 259, 480, 259, 480, 274, 306, 274},
         {315, 451, 482, 451, 482, 460, 315, 460},
-        {199, 194, 561, 194, 561, 490, 199, 490},
+        {40, 155, 126, 155, 126, 170, 40, 170},
+        {617, 159, 689, 159, 689, 173, 617, 173},
+        {620, 447, 711, 447, 711, 459, 620, 459},
     };
+
+    private static final int[] TRAFFIC_ROUTE = {199, 194, 561, 194, 561, 490, 199, 490};
 
     static final class Actor {
         final int model;
@@ -49,8 +54,10 @@ final class District {
     final Prop[] props;
     final Actor[] street = {
         new Actor(1, false, ROUTES[0]), new Actor(2, false, ROUTES[1]),
-        new Actor(3, false, ROUTES[2]), new Actor(1, true, ROUTES[3]),
-        new Actor(2, true, ROUTES[3]), new Actor(3, true, ROUTES[3])
+        new Actor(3, false, ROUTES[2]), new Actor(4, false, ROUTES[3]),
+        new Actor(5, false, ROUTES[4]), new Actor(6, false, ROUTES[5]),
+        new Actor(1, true, TRAFFIC_ROUTE), new Actor(2, true, TRAFFIC_ROUTE),
+        new Actor(3, true, TRAFFIC_ROUTE)
     };
     int heroX, heroY, carX, carY, heroDir, carDir;
     private int velocityX, velocityY, ticks;
@@ -100,9 +107,12 @@ final class District {
         place(street[0], 323, 173, RIGHT, 2);
         place(street[1], 347, 259, RIGHT, 2);
         place(street[2], 451, 460, LEFT, 6);
-        place(street[3], 336, 194, RIGHT, 2);
-        place(street[4], 561, 320, DOWN, 4);
-        place(street[5], 404, 490, LEFT, 6);
+        place(street[3], 122, 170, LEFT, 6);
+        place(street[4], 640, 159, RIGHT, 2);
+        place(street[5], 684, 459, LEFT, 6);
+        place(street[6], 336, 194, RIGHT, 2);
+        place(street[7], 561, 320, DOWN, 4);
+        place(street[8], 404, 490, LEFT, 6);
         cameraX = heroX;
         cameraY = heroY;
     }

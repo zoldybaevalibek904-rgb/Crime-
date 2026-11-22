@@ -2,7 +2,7 @@ from pathlib import Path
 from struct import unpack_from
 from zipfile import ZipFile
 
-jar = Path("dist/CrimeDistrict_Alpha02.jar")
+jar = Path("dist/CrimeDistrict_Alpha021.jar")
 jad = dict(line.split(": ", 1) for line in jar.with_suffix(".jad").read_text().splitlines())
 assert jad["MIDlet-Jar-URL"] == jar.name
 assert int(jad["MIDlet-Jar-Size"]) == jar.stat().st_size
@@ -23,14 +23,16 @@ with ZipFile(jar) as package:
             assert package.read(name)[:8] == bytes.fromhex("cafebabe0003002d")
     assert b"\x00\x08StackMap" in package.read("crimedistrict/CrimeDistrict$Screen.class")
 
-    atlases = {"tiles": (128, 80), "walker": (120, 120), "sedan": (176, 44), "traffic": (192, 144),
-               "pedestrian1": (120, 120), "pedestrian2": (120, 120), "pedestrian3": (120, 120)}
+    atlases = {"tiles": (128, 80), "walker": (96, 144), "sedan": (176, 44), "traffic": (192, 144)}
+    atlases.update((f"pedestrian{i}", (96, 144)) for i in range(1,7))
     for name in [*atlases, *(f"prop{i}" for i in range(16))]:
         image = package.read(name + ".png")
         assert image.startswith(b"\x89PNG\r\n\x1a\n")
         size = unpack_from(">II", image, 16)
         if name in atlases:
             assert size == atlases[name]
+            if name != "tiles":
+                assert image[25] == 3 and b"tRNS" in image
         else:
             assert all(0 < edge <= 256 for edge in size)
 
