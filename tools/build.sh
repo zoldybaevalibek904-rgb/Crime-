@@ -28,13 +28,13 @@ java -jar .build/deps/proguard-base-6.2.2.jar \
 cat > .build/manifest <<'MANIFEST'
 Manifest-Version: 1.0
 MIDlet-Name: Crime District
-MIDlet-Version: 0.4.0
+MIDlet-Version: 0.5.0
 MIDlet-Vendor: Crime District
 MIDlet-1: Crime District,,crimedistrict.CrimeDistrict
 MicroEdition-Configuration: CLDC-1.1
 MicroEdition-Profile: MIDP-2.0
 MANIFEST
-name=CrimeDistrict_Alpha04
+name=CrimeDistrict_Alpha05
 python3 - "$name" <<'PYZIP'
 import sys
 from pathlib import Path

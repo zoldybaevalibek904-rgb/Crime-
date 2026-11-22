@@ -4,12 +4,13 @@ import java.util.Vector;
 
 /** Fixed population and authored lane graphs. Actors keep their world positions off-screen. */
 final class Street {
-    static final int CIVILIAN = 0, PARKED = 1, POLICE = 2, RED = 3, IRON = 4, CONTACT = 5, CARGO = 6, EMS = 7, MEDIC = 8, GARAGE = 9;
+    static final int CIVILIAN = 0, PARKED = 1, POLICE = 2, RED = 3, IRON = 4, CONTACT = 5, CARGO = 6, EMS = 7, MEDIC = 8, GARAGE = 9, RESPONSE=10, ARMOR=11, GUARD=12;
     static final int IDLE = 0, PATROL = 1, ALERT = 2, CHASE = 3, RETURN = 4;
     static final int RED_X = 1120, RED_Y = 443, IRON_X = 641, IRON_Y = 1147;
     static final int GUARD_X = 1224, GUARD_Y = 1314;
     static final int HOSPITAL_X=1883,HOSPITAL_Y=172;
-    static final int LEGACY_POPULATION=44;
+    static final int LEGACY_POPULATION=44, ALPHA04_POPULATION=99;
+    static final int BROKER_X=335,BROKER_Y=1569;
     static final int CARGO_X = 291, CARGO_Y = 985;
 
     static District.Actor[] populate() {
@@ -88,6 +89,16 @@ final class Street {
         walk(actors,26,MEDIC,1890,247,0,new int[]{1890,247});
         for(int i=0;i<4;i++) car(actors,i,GARAGE,Trade.GARAGE_X,Trade.GARAGE_Y+15);
 
+        for(int i=0;i<3;i++) walk(actors,25,RESPONSE,1,1,0,new int[]{1,1});
+        add(actors,10,true,ARMOR,1,1,District.RIGHT,2,new int[8]);
+        walk(actors,27,GUARD,379,172,0,new int[]{379,172});
+        add(actors,6,true,CIVILIAN,386,1194,District.LEFT,6,lanes(0,704));
+        add(actors,7,true,CIVILIAN,1813,898,District.RIGHT,2,lanes(1536,704));
+        add(actors,8,true,CIVILIAN,2587,194,District.RIGHT,2,lanes(2304,0));
+        add(actors,9,true,CIVILIAN,1151,194,District.RIGHT,2,lanes(768,0));
+        for(int i=6;i<=9;i++) car(actors,i,GARAGE,Trade.GARAGE_X,Trade.GARAGE_Y+15);
+
+        walk(actors,28,CONTACT,BROKER_X,BROKER_Y,0,new int[]{BROKER_X,BROKER_Y});
         District.Actor[] result = new District.Actor[actors.size()];
         actors.copyInto(result);
         return result;

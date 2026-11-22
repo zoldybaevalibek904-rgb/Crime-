@@ -103,7 +103,7 @@ public class ModelQA {
         }
         for (int i=Street.LEGACY_POPULATION;i<d.street.length;i++) {
             District.Actor a=d.street[i];
-            if (a.route.length>2) check(Integer.bitCount(facings[i])>=2,"new actor route "+i);
+            if (a.route.length>2 && a.role!=Street.ARMOR) check(Integer.bitCount(facings[i])>=2,"new actor route "+i);
         }
         d.reset();
         car(d,716,216);
@@ -189,7 +189,8 @@ public class ModelQA {
         d.offence();
         d.offence();
         d.offence();
-        check(d.wanted==3,"wanted caps at three");
+        d.offence(); d.offence();
+        check(d.wanted==5,"wanted caps at five");
         boolean pursuit = false;
         for (int i=0;i<50;i++) {
             frame(d,0);
@@ -198,8 +199,8 @@ public class ModelQA {
         }
         check(pursuit,"police react to wanted player");
         foot(d,1060,1305);
-        steps(d,0,550);
-        check(d.wanted==0,"all three stars decay after losing sight");
+        steps(d,0,1020);
+        check(d.wanted==0,"all five stars decay after losing sight");
 
         d.reset();
         District.Actor police = vehicle(d,4,Street.POLICE);
@@ -289,6 +290,7 @@ public class ModelQA {
     private static void aim(District d,int direction,int controls) {
         d.heroDir=direction;
         d.tick(false,false,false,false,false,controls);
+        if((controls&1)!=0 && d.combat.windup>0) steps(d,0,d.combat.windup);
         d.follow(240,320);
     }
 
@@ -338,7 +340,7 @@ public class ModelQA {
         d.trade.choose(d,Trade.WEAPONS,2);
         steps(d,0,16);
         aim(d,District.RIGHT,1);
-        check(d.combat.magazine[3]==17 && d.combat.cooldown==5,"SMG fire rate and ammo");
+        check(d.combat.magazine[3]==17 && d.combat.cooldown==4,"SMG fire rate and ammo");
         d.trade.choose(d,Trade.WEAPONS,3);
         aim(d,District.RIGHT,4);
         steps(d,0,44);
@@ -433,7 +435,7 @@ public class ModelQA {
         District.Actor taxi=d.garageVehicle(1);
         check(!taxi.deferred && taxi.claimed && (d.trade.cars&2)!=0,"garage buys and delivers taxi");
         frame(d,0);
-        check(d.story.finished(),"All eleven story jobs complete");
+        check(d.story.chapter==11,"All original story jobs complete");
 
         d.car=taxi;
         car(d,985,234);
@@ -461,7 +463,7 @@ public class ModelQA {
         d.combat.magazine[2]=3;
         byte[] save=Snapshot.encode(d);
         d.reset();
-        check(Snapshot.decode(d,save) && d.story.finished() && d.combat.hp==59 && d.car.hp==64 &&
+        check(Snapshot.decode(d,save) && d.story.chapter==11 && d.combat.hp==59 && d.car.hp==64 &&
               d.combat.magazine[2]==3 && (d.trade.cars&2)!=0,"new health, tools and cars survive reload");
         java.io.ByteArrayOutputStream buffer=new java.io.ByteArrayOutputStream();
         java.io.DataOutputStream legacy=new java.io.DataOutputStream(buffer);
@@ -472,6 +474,211 @@ public class ModelQA {
         for(int i=0;i<Street.LEGACY_POPULATION;i++) legacy.writeBoolean(false);
         check(Snapshot.decode(d,buffer.toByteArray()) && d.story.chapter==6 && d.heroX/U==1200 &&
               d.heroY/U==1280 && d.combat.hp==100,"migration from real v1 byte layout");
+    }
+
+    private static void controls05(District d) {
+        Sprint sprint=new Sprint();
+        sprint.press(RIGHT,0,1000);
+        check(!sprint.active(),"single direction tap remains walking");
+        sprint.press(RIGHT,RIGHT,1060);
+        check(!sprint.active(),"key repeat does not count as double tap");
+        sprint.release(0);
+        sprint.press(RIGHT,0,1230);
+        check(sprint.active(),"double tap inside 275ms sprints");
+        sprint.press(UP,RIGHT,1280);
+        sprint.release(UP);
+        check(sprint.active(),"changing direction with another key held keeps sprint");
+        sprint.release(0);
+        check(!sprint.active(),"releasing direction stops sprint");
+        sprint.press(UP,0,1800);
+        check(!sprint.active(),"slow taps do not sprint");
+        d.reset();
+        foot(d,350,239);
+        int before=d.heroX;
+        d.tick(false,false,false,true,false,8);
+        check(d.running && d.heroX-before==District.RUN_SPEED,"sprint travels using the running speed");
+        frame(d,0);
+        check(!d.running,"idle terminates running");
+
+        foot(d,350,239);
+        District.Actor victim=pose(d.street[1],362,239);
+        d.heroDir=District.RIGHT;
+        frame(d,FIRE);
+        check(d.combat.windup==6 && victim.hp==100,"context attack starts full-body wind-up");
+        steps(d,0,6);
+        check(victim.hp==78,"context strike connects on its contact frame");
+        d.reset();
+        foot(d,234,218);
+        d.gear.spawn(d,236,218,Gear.CASH,31);
+        d.gear.spawn(d,238,218,Gear.PISTOL,8);
+        frame(d,FIRE);
+        check(!d.driving && d.trade.money==251 && d.combat.attackPose==0,"loot is higher priority than car or attack");
+        frame(d,FIRE);
+        check(!d.driving && (d.combat.owned&4)!=0,"same context key picks up dropped gun");
+        frame(d,FIRE);
+        check(d.driving && d.trade.money==251,"after loot is gone the key enters the car");
+        frame(d,FIRE);
+        check(!d.driving,"context key exits without attacking");
+        aim(d,District.RIGHT,2);
+        check(d.combat.weapon==2,"weapon cycle skips unowned bat");
+    }
+
+    private static void response05(District d) {
+        d.reset();
+        District.Actor worker=null;
+        for(District.Actor a:d.street) if(a.model==9 && !a.vehicle && a.role==Street.CIVILIAN) { worker=a; break; }
+        check(worker!=null && worker.courage()>=2,"brave civilians exist");
+        int x=worker.x/U,y=worker.y/U;
+        foot(d,x-12,y);
+        worker.wait=30;
+        d.heroDir=District.RIGHT;
+        frame(d,FIRE);
+        steps(d,0,6);
+        check(worker.threat>0 && worker.panic==0,"struck worker chooses retaliation");
+        steps(d,0,52);
+        check(d.combat.hp<100 && worker.duty==Street.CHASE,"civilian actively counters");
+
+        d.reset();
+        foot(d,350,239);
+        District.Actor witness=vehicle(d,4,Street.POLICE);
+        witness.x=393*U; witness.y=239*U; witness.dir=District.RIGHT;
+        witness.speed=0;
+        District.Actor civilian=pose(d.street[1],362,239);
+        d.heroDir=District.RIGHT;
+        frame(d,FIRE);
+        steps(d,0,6);
+        check(civilian.hp<100 && d.wanted==1,"cruiser eyewitness responds to punch immediately");
+        steps(d,0,19);
+        check(witness.empty && d.police.deployments==1,"cruiser stops and officer physically dismounts");
+        d.wanted=0;
+        for(District.Actor a:d.street) if(a.officer() && a!=witness) a.deferred=true;
+        d.reportCrime(1,false);
+        check(d.wanted==0,"empty cruiser does not witness");
+
+        d.reset();
+        foot(d,350,240);
+        d.reportCrime(2,true);
+        check(d.wanted==2,"level two engages cars");
+        d.reportCrime(3,true);
+        check(d.wanted==3 && vehicle(d,4,Street.POLICE).arms(3)>0,"level three authorizes firearms");
+        d.reportCrime(4,true);
+        steps(d,0,9);
+        check(d.police.airborne,"level four dispatches a helicopter");
+        int air=d.police.airX;
+        steps(d,0,18);
+        check(d.police.airX!=air,"helicopter flies toward the search area");
+        d.reportCrime(5,true);
+        steps(d,0,44);
+        District.Actor heavy=vehicle(d,10,Street.ARMOR);
+        check(!heavy.deferred && (heavy.speed>0 || heavy.moving) &&
+              d.zoneAt(heavy.x/U/16,heavy.y/U/16)==District.ROAD,"level five tank is mobile on a road");
+        check(d.wanted<=5,"wanted capped");
+    }
+
+    private static void interiorsAndCampaign05(District d) throws Exception {
+        d.reset();
+        for(int room=0;room<Rooms.NAMES.length;room++) {
+            foot(d,Rooms.X[room],Rooms.Y[room]);
+            check(d.rooms.enter(d) && d.rooms.id==room,"openable room "+room);
+            for(int i=0;i<30;i++) d.rooms.move(District.UP,false);
+            check(d.rooms.y<128 && Rooms.clear(room,d.rooms.x,d.rooms.y),"room movement respects layout "+room);
+            for(int i=0;i<34;i++) d.rooms.move(District.DOWN,false);
+            d.rooms.action(d);
+            check(!d.rooms.active(),"return to outdoor coordinates "+room);
+        }
+        foot(d,Rooms.X[4],Rooms.Y[4]);
+        check(d.rooms.enter(d),"safehouse available");
+        d.rooms.x=97; d.rooms.y=89;
+        d.combat.hp=40;
+        d.rooms.action(d);
+        check(d.combat.hp==100,"safehouse recovery works");
+        d.gear.medkits=6;
+        d.gear.red=-4;
+        d.trade.businesses=3;
+        d.trade.till=86;
+        d.trade.cars|=1<<9;
+        byte[] packed=Snapshot.encode(d);
+        d.reset();
+        check(Snapshot.decode(d,packed) && d.rooms.id==4 && d.rooms.x==97 && d.gear.medkits==6 &&
+              d.gear.red==-4 && d.trade.businesses==3 && d.trade.till==86 && (d.trade.cars&(1<<9))!=0,
+              "room inventory, vehicles, gang relation and businesses persist");
+
+        d.reset();
+        d.trade.money=1300;
+        d.trade.choose(d,Trade.MARKET,1);
+        d.trade.choose(d,Trade.GARAGE,9);
+        check(d.trade.businesses==3 && d.trade.money==200,"two businesses debit their prices");
+        steps(d,0,3200);
+        check(d.trade.till==160 && d.trade.money==200,"income accrues to a bounded till");
+        d.trade.choose(d,Trade.MARKET,1);
+        check(d.trade.till==0 && d.trade.money==360,"income collected once");
+
+        d.reset();
+        d.story.restore(11,0);
+        foot(d,Street.BROKER_X,Street.BROKER_Y-10);
+        frame(d,FIRE);
+        check(d.story.chapter==12,"new contacts advances after talking");
+        steps(d,0,110);
+        visit(d,Street.IRON_X,Street.IRON_Y); visit(d,473,1219);
+        check(d.story.chapter==13,"foreign turf objectives");
+        steps(d,0,110);
+        car(d,554,1199); frame(d,0);
+        car(d,970,1218); frame(d,0);
+        car(d,1719,1220); frame(d,0);
+        check(d.story.chapter==14,"shipment crossing multiple districts");
+        steps(d,0,110);
+        foot(d,Street.BROKER_X,Street.BROKER_Y-10); frame(d,FIRE);
+        d.story.defeated(Street.RED); frame(d,0);
+        check(d.story.chapter==15,"bad deal dialogue and combat");
+        steps(d,0,110);
+        d.trade.money=700;
+        d.trade.choose(d,Trade.MARKET,1); frame(d,0);
+        check(d.story.chapter==16,"business mission uses ownership");
+        steps(d,0,110);
+        foot(d,Street.BROKER_X,Street.BROKER_Y-10); frame(d,FIRE);
+        car(d,978,914); frame(d,0);
+        check(d.wanted==2 && d.story.stage==2,"finale begins chase");
+        d.wanted=0;
+        car(d,1450,1231); frame(d,0);
+        visit(d,842,144);
+        check(d.story.finished(),"all 17 missions completed through objective transitions");
+    }
+
+    private static void activitiesAndV2(District d) throws Exception {
+        d.reset();
+        int cash=d.trade.money;
+        d.trade.choose(d,Trade.WORK,3);
+        visit(d,454,550);
+        check(d.gear.token==2 && d.trade.job==3,"courier picks up a parcel");
+        visit(d,325,168); visit(d,842,144);
+        check(d.trade.job==-1 && d.gear.token==0 && d.trade.money==cash+80,"courier drops off parcel");
+        d.trade.choose(d,Trade.WORK,4);
+        car(d,743,388); frame(d,0);
+        car(d,1890,231); frame(d,0);
+        car(d,2450,493); frame(d,0);
+        check(d.trade.job==-1 && d.trade.money==cash+195,"vehicle delivery completes all waypoints");
+        d.trade.choose(d,Trade.WORK,5);
+        for(int[] p:new int[][]{{978,914},{1330,1194},{1720,1216},{2100,1194}}) {
+            car(d,p[0],p[1]); frame(d,0);
+        }
+        check(d.trade.job==-1 && d.trade.money==cash+325,"coast sprint completes timed checkpoints");
+
+        java.io.ByteArrayOutputStream buffer=new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream v2=new java.io.DataOutputStream(buffer);
+        v2.writeInt(0x4344524d);v2.writeByte(2);
+        v2.writeShort(226);v2.writeShort(218);v2.writeByte(District.DOWN);
+        v2.writeByte(11);v2.writeByte(0);v2.writeByte(2);v2.writeBoolean(true);
+        v2.writeByte(0);v2.writeByte(Street.ALPHA04_POPULATION);
+        v2.writeBoolean(true);
+        v2.writeShort(267);v2.writeShort(229);v2.writeByte(District.RIGHT);v2.writeByte(77);
+        for(int i=1;i<Street.ALPHA04_POPULATION;i++) v2.writeBoolean(false);
+        v2.writeByte(65);v2.writeInt(712);
+        v2.writeByte(5);v2.writeByte(2);
+        v2.writeByte(4);v2.writeByte(19);v2.writeByte(0);v2.writeByte(0);
+        v2.writeByte(1);v2.writeByte(1);v2.writeByte(-1);v2.writeByte(0);v2.writeShort(0);
+        check(Snapshot.decode(d,buffer.toByteArray()) && d.driving && d.car.hp==77 && d.combat.hp==65 &&
+              d.combat.magazine[2]==4 && d.story.chapter==11 && d.trade.money==712,
+              "Alpha 0.4 v2 save preserves car, ammunition, health, cash and mission state");
     }
 
     public static void main(String[] args) throws Exception {
@@ -487,6 +694,10 @@ public class ModelQA {
         combat(d);
         ambulance(d);
         tradesAndNewStory(d);
-        System.out.println("PASS 32,500 route ticks, old and expanded districts, all weapons, pursuit, EMS, eleven story jobs, three paid jobs and save migration");
+        controls05(d);
+        response05(d);
+        interiorsAndCampaign05(d);
+        activitiesAndV2(d);
+        System.out.println("PASS 32,500 route ticks, context input, retaliation, police dismount, 5 stars, EMS, interiors, businesses, 17 missions and save migration");
     }
 }

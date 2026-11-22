@@ -2,7 +2,7 @@ from pathlib import Path
 from struct import unpack_from
 from zipfile import ZipFile
 
-jar = Path("dist/CrimeDistrict_Alpha04.jar")
+jar = Path("dist/CrimeDistrict_Alpha05.jar")
 jad = dict(line.split(": ", 1) for line in jar.with_suffix(".jad").read_text().splitlines())
 assert jad["MIDlet-Jar-URL"] == jar.name
 assert int(jad["MIDlet-Jar-Size"]) == jar.stat().st_size
@@ -24,6 +24,13 @@ with ZipFile(jar) as package:
     assert b"\x00\x08StackMap" in package.read("crimedistrict/CrimeDistrict$Screen.class")
 
     atlases = {"tiles": (128, 112), "walker": (96, 144), "sedan": (176, 44), "traffic": (192, 144), "cruiser": (176, 44), "ambulance": (192,48), "actions": (180,176)}
+    atlases.update({"walk05": (240,168), "run05": (160,168), "fist05": (240,168),
+                    "bat05": (240,168), "shoot05": (240,168), "hurt05": (120,168),
+                    "fall05": (120,168), "motors05": (192,192), "tank05": (192,48), "heli05": (192,48)})
+    for i in range(5):
+        image=package.read(f"room05-{i}.png")
+        assert unpack_from(">II",image,16)==(192,160)
+    atlases.update((f"person05-{i}", (196 if i==25 else 168,152)) for i in (9,19,23,24,25,26,27,28))
     atlases.update((f"pedestrian{i}", (96, 144)) for i in range(1,27))
     for name in [*atlases, *(f"prop{i}" for i in range(29))]:
         image = package.read(name + ".png")

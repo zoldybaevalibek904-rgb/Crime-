@@ -11,6 +11,7 @@ final class Combat {
     static final int NORMAL = 0, WASTED = 1, BUSTED = 2;
 
     int hp, weapon, owned, cooldown, reload, attackPose, hurt, life, recovery, safety;
+    int windup, aim, duration, attackWeapon;
     int lineX, lineY, hitX, hitY, flash;
     final int[] magazine = new int[4], reserve = new int[4];
 
@@ -19,7 +20,7 @@ final class Combat {
         weapon = 0;
         owned = 1;
         for (int i=0;i<4;i++) magazine[i]=reserve[i]=0;
-        cooldown = reload = attackPose = hurt = life = recovery = safety = flash = 0;
+        cooldown = reload = attackPose = hurt = life = recovery = safety = flash = windup = aim = duration = 0;
     }
 
     void tick(District d, int controls) {
@@ -37,7 +38,8 @@ final class Combat {
             }
             return;
         }
-        if ((controls & 2) != 0 && !d.driving) {
+        if (windup>0 && --windup==0) strike(d);
+        if ((controls & 2) != 0 && !d.driving && windup==0) {
             do weapon=(weapon+1)%4; while ((owned & (1<<weapon)) == 0);
             reload=0;
         }
@@ -48,7 +50,7 @@ final class Combat {
         }
         if (d.driving) return;
         if ((controls&4)!=0) reload();
-        if ((controls&1)!=0 && cooldown==0 && reload==0) attack(d);
+        if ((controls&1)!=0 && cooldown==0 && reload==0 && hurt<5) attack(d);
     }
 
     private void reload() {
@@ -62,11 +64,21 @@ final class Combat {
             reload();
             return;
         }
-        if (gun) magazine[weapon]--;
-        cooldown=RATE[weapon];
-        attackPose=gun?5:8;
+        duration=gun?6:12;
+        attackPose=duration;
+        windup=gun?2:6;
+        cooldown=Math.max(RATE[weapon],duration);
+        aim=d.heroDir;
+        attackWeapon=weapon;
+    }
+
+    private void strike(District d) {
+        if(d.driving || life!=NORMAL || d.rooms.active()) return;
+        boolean gun=weapon>=2;
+        if(gun && magazine[weapon]==0) return;
+        if(gun) magazine[weapon]--;
         int x=d.heroX/District.UNIT,y=d.heroY/District.UNIT;
-        int dx=District.DX[d.heroDir],dy=District.DY[d.heroDir];
+        int dx=District.DX[aim],dy=District.DY[aim];
         District.Actor victim=null;
         int lastX=x,lastY=y;
         for (int distance=3;distance<=REACH[weapon];distance+=3) {
@@ -91,13 +103,14 @@ final class Combat {
             victim.hp=Math.max(0,victim.hp-DAMAGE[weapon]);
             victim.hit=10;
             victim.threat=240;
-            direct=victim.role==Street.POLICE;
+            direct=victim.officer();
             offence=Math.max(offence,direct?(victim.hp==0?3:2):(victim.hp==0?2:1));
             d.startle(x,y,gun?145:68);
             if (victim.hp==0) {
                 victim.moving=false;
                 victim.fallen=d.ticks;
                 d.ems.request(d,victim);
+                d.gear.drop(d,victim);
                 d.story.defeated(victim.role);
             }
         }
@@ -107,8 +120,9 @@ final class Combat {
     void enemyAttack(District d,District.Actor attacker,int distance) {
         if (hp<=0 || life!=NORMAL || safety>0 || attacker.strike>0 ||
                 !d.canSee(attacker.x,attacker.y,d.focusX(),d.focusY())) return;
-        boolean gun=attacker.model==24 && attacker.threat>0;
-        int reach=gun?70:attacker.model==23?23:17;
+        int weapon=attacker.arms(d.wanted);
+        boolean gun=weapon>=2;
+        int reach=gun?70:weapon==1?23:17;
         if (distance>reach || d.driving) return;
         attacker.strike=gun?36:24;
         attacker.hitPose=8;
@@ -118,13 +132,15 @@ final class Combat {
             flash=3;
             d.startle(lineX,lineY,90);
         }
-        damage(d,gun?15:attacker.model==23?13:8);
+        damage(d,gun?15:weapon==1?13:8);
     }
 
     void damage(District d,int amount) {
         if (life!=NORMAL || safety>0) return;
         hp=Math.max(0,hp-amount);
         hurt=9;
+        windup=attackPose=0;
+        d.recoil();
         if (hp==0) end(d,WASTED);
     }
 
@@ -138,7 +154,7 @@ final class Combat {
         d.walking=false;
         d.wanted=0;
         reload=0;
-        attackPose=0;
+        windup=attackPose=0;
         d.trade.fine(outcome==WASTED?90:60);
     }
 }

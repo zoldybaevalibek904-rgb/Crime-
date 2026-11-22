@@ -10,21 +10,38 @@ final class District {
     static final int[] DX = {0, 0, -1, 1};
     static final int[] DY = {-1, 1, 0, 0};
     static final int UNIT = 256;
-    static final int HERO_SPEED = 360;
+    static final int HERO_SPEED = 360, RUN_SPEED = 575;
     static final int CAR_SPEED = 920;
-    static final int PEDESTRIAN_MODELS = 26;
+    static final int PEDESTRIAN_MODELS = 28;
     static final int ROAD = 0, SIDEWALK = 1, BUILDING = 2, SAND = 3, WATER = 4, PARKING = 5, DECOR = 6, BLOCKED = 7;
-    private static final int[] LIMIT = {920, 860, 790, 690, 920, 800};
-    private static final int[] ACCEL = {64, 79, 52, 42, 64, 61};
-    private static final int[] BRAKE = {106, 128, 90, 73, 106, 96};
+    private static final int[] LIMIT = {920,860,790,690,920,800,810,1110,1040,945,540};
+    private static final int[] ACCEL = {64,79,52,42,64,61,57,91,84,69,36};
+    private static final int[] BRAKE = {106,128,90,73,106,96,90,119,80,112,75};
 
     static final class Actor {
         final int model, role, startX, startY, startDir, startWaypoint;
         final boolean vehicle;
         final int[] route;
         int x, y, dir, waypoint, wait, stride, speed, blocked, routeStep, duty;
-        int hp, hit, threat, panic, strike, hitPose, fallen;
-        boolean moving, claimed, deferred, removed;
+        int hp, hit, threat, panic, strike, hitPose, fallen, detour, detourDir;
+        boolean moving, claimed, deferred, removed, empty, pullOver;
+        Actor transport;
+
+        boolean officer() { return role==Street.POLICE || role==Street.RESPONSE; }
+        int courage() {
+            if(officer() || role==Street.RED || role==Street.IRON || role==Street.GUARD) return 3;
+            if(role==Street.CIVILIAN && (model==4 || model==9 || model==10 || model==12)) return 2;
+            return 0;
+        }
+
+        int aggression() {
+            if(courage()==3 || model==9 || model==12) return 2;
+            return courage()==2?1:0;
+        }
+
+        int arms(int stars) {
+            return officer() && stars>=3 || model==24 ? 2 : model==23 || role==Street.GUARD ? 1 : 0;
+        }
 
         Actor(int model, boolean vehicle, int role, int x, int y, int dir, int waypoint, int[] route) {
             this.model = model;
@@ -44,10 +61,11 @@ final class District {
             waypoint = startWaypoint;
             wait = stride = speed = blocked = 0;
             routeStep = 2;
-            moving = claimed = removed = false;
-            deferred = role==Street.EMS || role==Street.MEDIC || role==Street.GARAGE;
+            moving = claimed = removed = empty = pullOver = false;
+            transport=null;
+            deferred = role==Street.EMS || role==Street.MEDIC || role==Street.GARAGE || role==Street.RESPONSE || role==Street.ARMOR;
             hp = !vehicle && (role==Street.RED || role==Street.IRON) ? 74 : 100;
-            hit = threat = panic = strike = hitPose = fallen = 0;
+            hit = threat = panic = strike = hitPose = fallen = detour = detourDir = 0;
             duty = route.length > 2 ? Street.PATROL : Street.IDLE;
         }
     }
@@ -64,6 +82,9 @@ final class District {
     final Story story = new Story();
     final Combat combat = new Combat();
     final Trade trade = new Trade();
+    final Gear gear = new Gear();
+    final Rooms rooms = new Rooms();
+    final Police police = new Police();
     final EMS ems = new EMS();
     int lifeRevision;
     Actor car;
@@ -72,7 +93,7 @@ final class District {
     int ticks, wanted, unseen, notice;
     private int offenceCooldown, caught;
     int cameraX, cameraY, stride;
-    boolean driving, walking;
+    boolean driving, walking, running;
 
     District(InputStream stream) throws IOException {
         if (stream == null) throw new IOException("Missing city map");
@@ -119,11 +140,14 @@ final class District {
         heroX = 226 * UNIT;
         heroY = 218 * UNIT;
         heroDir = DOWN;
-        walking = driving = false;
+        running = walking = driving = false;
         velocityX = velocityY = stride = ticks = wanted = unseen = offenceCooldown = caught = notice = 0;
         story.reset();
         combat.reset();
         trade.reset();
+        gear.reset();
+        rooms.reset();
+        police.reset();
         lifeRevision=0;
         for (int i = 0; i < street.length; i++) street[i].reset();
         ems.reset(this);
@@ -162,27 +186,37 @@ final class District {
             if (driving) {
                 if (canLeaveCar()) leaveCar();
             } else {
-                Actor next = nearbyCar();
-                if (next != null) {
-                    car = next;
-                    if (!car.claimed && car.role == Street.CIVILIAN) reportCrime(1,true);
-                    car.claimed = true;
-                    car.speed = velocityX = velocityY = 0;
-                    driving = true;
+                if (!gear.take(this)) {
+                    Actor next=nearbyCar();
+                    if(next!=null) {
+                        car=next;
+                        if(!car.claimed && car.role==Street.CIVILIAN) reportCrime(1,true);
+                        car.claimed=true;
+                        car.speed=velocityX=velocityY=0;
+                        driving=true;
+                    } else if (!rooms.enter(this) && !chat() && trade.place(this)==0) {
+                        controls|=1;
+                    }
                 }
             }
         }
+        running=false;
+        if (driving) walking=false;
+        if (rooms.active()) return;
         if (normal) {
             if (driving) {
                 if (car.hp>0) drive(up, down, left, right);
                 else velocityX=velocityY=0;
-                if ((controls&1)!=0 && ticks%12==0)
+                if ((controls&16)!=0 && ticks%12==0)
                     startle(car.x/UNIT,car.y/UNIT,62);
-            } else if (combat.hurt<7) walk(up, down, left, right);
+            } else if (combat.hurt<7 && combat.windup==0)
+                walk(up,down,left,right,(controls&8)!=0);
+            else walking=false;
         }
         ticks++;
         combat.tick(this,controls);
         ems.tick(this);
+        police.tick(this);
         if (offenceCooldown > 0) offenceCooldown--;
         if (notice > 0) notice--;
         boolean seen = false;
@@ -201,19 +235,21 @@ final class District {
                 continue;
             }
             if (actor.deferred) {
+                if (actor.role==Street.RESPONSE || actor.role==Street.ARMOR) continue;
                 if (((ticks+i)&31) != 0 || distance(actor,focusX(),focusY()) < 235 || !spawnClear(actor)) continue;
                 actor.deferred = false;
             }
             if (actor.claimed || (actor.vehicle && actor.route.length == 0)) continue;
             int distance = distance(actor, focusX(), focusY());
             boolean distant = absolute(actor.x-cameraX) > 176*UNIT || absolute(actor.y-cameraY) > 216*UNIT;
-            if (!actor.deferred && actor.hp>0 && actor.role == Street.POLICE && wanted > 0 && distance < sightRange() &&
+            if (!actor.deferred && actor.hp>0 && actor.officer() && !actor.empty && wanted > 0 && distance < sightRange() &&
                 canSee(actor.x, actor.y, focusX(), focusY())) seen = true;
             if (distant && (((ticks+i)&3) != 0 || distance > 540)) continue;
             updateActor(actor, distant ? 4 : 1, distance);
         }
         if (wanted > 0) {
-            if (seen) {
+            if (seen || police.airSight(this)) {
+                police.sight(this);
                 unseen = 0;
                 if (!driving && policeAtFeet()) {
                     if (++caught >= 46) {
@@ -230,10 +266,35 @@ final class District {
         trade.tick(this);
     }
 
+    Actor conversational() {
+        Actor best=null;
+        int distance=19;
+        for(int i=0;i<street.length;i++) {
+            Actor a=street[i];
+            if(a.vehicle || a.deferred || a.hp<=0 || a.threat>0 ||
+                    a.role!=Street.CONTACT && a.role!=Street.GUARD) continue;
+            int dist=distance(a,heroX,heroY);
+            if(dist<distance && canSee(heroX,heroY,a.x,a.y)) {
+                best=a;
+                distance=dist;
+            }
+        }
+        return best;
+    }
+
+    private boolean chat() {
+        Actor a=conversational();
+        if(a==null) return false;
+        story.talk(a.model);
+        trade.tell(a.role==Street.GUARD?"Keep it calm here.":a.model==16?
+                "Meet me on the boardwalk.":a.model==28?"I can connect you with work.":"There is work across town.");
+        return true;
+    }
+
     void startle(int x,int y,int radius) {
         for (int i=0;i<street.length;i++) {
             Actor a=street[i];
-            if (!a.vehicle && !a.deferred && a.hp>0 && a.role==Street.CIVILIAN &&
+            if (!a.vehicle && !a.deferred && a.hp>0 && a.role==Street.CIVILIAN && a.courage()<2 &&
                     absolute(a.x/UNIT-x)+absolute(a.y/UNIT-y)<radius)
                 a.panic=Math.max(a.panic,84);
         }
@@ -259,12 +320,12 @@ final class District {
         if (!direct) {
             for (int i=0;i<street.length;i++) {
                 Actor a=street[i];
-                if (a.role==Street.POLICE && !a.deferred && a.hp>0 &&
+                if (a.officer() && !a.deferred && !a.empty && a.hp>0 &&
                         distance(a,focusX(),focusY())<=150 &&
                         canSee(a.x,a.y,focusX(),focusY())) { direct=true; break; }
             }
         }
-        if (direct) { wanted=Math.max(wanted,Math.min(3,level)); unseen=0; }
+        if (direct) police.report(this,level);
     }
 
     boolean onCamera(int x,int y) {
@@ -280,6 +341,7 @@ final class District {
         velocityX=velocityY=wanted=unseen=caught=0;
         lifeRevision++;
         trade.job=-1; trade.jobTime=0;
+        gear.token&=1;
         trade.tell("Hospital recovery");
     }
 
@@ -315,7 +377,7 @@ final class District {
     }
 
     void offence() {
-        wanted = Math.min(3, wanted+1);
+        wanted = Math.min(5, wanted+1);
         unseen = 0;
     }
 
@@ -324,7 +386,7 @@ final class District {
     private boolean policeAtFeet() {
         for (int i = 0; i < street.length; i++) {
             Actor a = street[i];
-            if (!a.deferred && a.hp>0 && a.role == Street.POLICE && !a.vehicle && distance(a,heroX,heroY) <= 13 &&
+            if (!a.deferred && a.hp>0 && a.officer() && !a.vehicle && distance(a,heroX,heroY) <= 13 &&
                 canSee(a.x,a.y,heroX,heroY)) return true;
         }
         return false;
@@ -353,20 +415,22 @@ final class District {
         return true;
     }
 
-    private void walk(boolean up, boolean down, boolean left, boolean right) {
+    private void walk(boolean up, boolean down, boolean left, boolean right,boolean sprint) {
         int direction = -1;
         if (up != down) direction = up ? UP : DOWN;
         else if (left != right) direction = left ? LEFT : RIGHT;
         walking = false;
         if (direction >= 0) {
             heroDir = direction;
-            int x = heroX + DX[direction] * HERO_SPEED;
-            int y = heroY + DY[direction] * HERO_SPEED;
+            int speed=sprint?RUN_SPEED:HERO_SPEED;
+            int x = heroX + DX[direction] * speed;
+            int y = heroY + DY[direction] * speed;
             if (freeHero(x, y)) {
                 heroX = x;
                 heroY = y;
                 walking = true;
-                stride = (stride + 1) % 24;
+                running=sprint;
+                stride = (stride + 1) % (sprint?16:24);
             }
         }
         if (!walking) stride = 0;
@@ -455,10 +519,16 @@ final class District {
     private void updateActor(Actor actor, int elapsed, int distance) {
         actor.moving = false;
         if (actor.vehicle) {
-            if (actor.role == Street.POLICE) {
-                actor.duty = wanted > 0 && distance < 145+wanted*45 ? Street.CHASE : Street.PATROL;
+            if (actor.empty || actor.pullOver) {
+                actor.speed=Math.max(0,actor.speed-130*elapsed);
+                return;
             }
-            patrol(actor, elapsed);
+            if (actor.role==Street.ARMOR) {
+                actor.duty=Street.CHASE;
+            } else if (actor.officer()) {
+                actor.duty=wanted>=2 && distance<145+wanted*38?Street.CHASE:Street.PATROL;
+            }
+            patrol(actor,elapsed);
             return;
         }
         if (actor.strike>0) actor.strike=Math.max(0,actor.strike-elapsed);
@@ -476,16 +546,31 @@ final class District {
             actor.duty=Street.RETURN;
             return;
         }
-        boolean police = actor.role == Street.POLICE;
-        boolean gang = actor.role == Street.RED || actor.role == Street.IRON;
-        boolean hostile = police ? wanted > 0 : gang && (story.gangAlert() || actor.threat>0 || story.fight(actor.role));
+        boolean law=actor.officer();
+        boolean gang=actor.role==Street.RED || actor.role==Street.IRON;
+        boolean retaliating=actor.threat>0 && actor.courage()>=2;
+        boolean hostile=law ? wanted>0 : retaliating || gang &&
+                (story.gangAlert() || story.fight(actor.role) ||
+                (actor.role==Street.RED?gear.red:gear.iron)<=-4 && distance<40);
+        int targetX=focusX(),targetY=focusY();
+        if(law && !canSee(actor.x,actor.y,targetX,targetY)) {
+            targetX=police.lastX;
+            targetY=police.lastY;
+        }
         int homeDistance = (absolute(actor.x-actor.startX)+absolute(actor.y-actor.startY))/UNIT;
-        if ((police || gang) && hostile && homeDistance < (police ? 205 : 88) &&
-            distance < (police ? sightRange() : 70) &&
-            (actor.duty == Street.CHASE || canSee(actor.x, actor.y, focusX(), focusY()))) {
-            actor.duty = Street.CHASE;
-            if (gang && (actor.threat>0 || story.fight(actor.role))) combat.enemyAttack(this,actor,distance);
-            if (actor.hitPose<6) manoeuvre(actor, focusX(), focusY(), elapsed, police ? (323+wanted*42) : 300);
+        if (hostile && (actor.role==Street.RESPONSE || homeDistance<(law?230:105)) &&
+            distance<(law?sightRange()+65:100) &&
+            (law || actor.duty==Street.CHASE || canSee(actor.x,actor.y,focusX(),focusY()))) {
+            actor.duty=Street.CHASE;
+            actor.dir=direction(targetX-actor.x,targetY-actor.y,actor.dir);
+            if (retaliating || gang && story.fight(actor.role) || law && wanted>=3)
+                combat.enemyAttack(this,actor,distance);
+            if (actor.hitPose<6) manoeuvre(actor,targetX,targetY,elapsed,law?323+wanted*39:275+actor.aggression()*34);
+            return;
+        }
+        if (actor.role==Street.RESPONSE && actor.transport!=null) {
+            actor.duty=Street.RETURN;
+            manoeuvre(actor,actor.transport.x,actor.transport.y,elapsed,290);
             return;
         }
         if (actor.duty == Street.CHASE || actor.duty == Street.RETURN) {
@@ -515,6 +600,18 @@ final class District {
         if (actor.duty == Street.PATROL) patrol(actor, elapsed);
     }
 
+    private void faceNeighbor(Actor actor) {
+        for(int i=0;i<street.length;i++) {
+            Actor other=street[i];
+            if(other==actor || other.vehicle || other.deferred || other.hp<=0 || other.moving ||
+                    other.duty==Street.CHASE || other.panic>0) continue;
+            if(distance(other,actor.x,actor.y)<=21 && canSee(actor.x,actor.y,other.x,other.y)) {
+                actor.dir=direction(other.x-actor.x,other.y-actor.y,actor.dir);
+                return;
+            }
+        }
+    }
+
     private boolean nearMovingVehicle(Actor pedestrian) {
         for (int i = 0; i < street.length; i++) {
             Actor a = street[i];
@@ -532,25 +629,40 @@ final class District {
         int dx = x-actor.x, dy = y-actor.y;
         int first = direction(dx,dy,actor.dir);
         int second = first < LEFT ? (dx < 0 ? LEFT : RIGHT) : (dy < 0 ? UP : DOWN);
-        for (int i = 0; i < 2; i++) {
-            int dir = i == 0 ? first : second;
-            int step = Math.min(elapsed*speed, absolute(dir < LEFT ? dy : dx));
-            int nextX = actor.x+DX[dir]*step, nextY = actor.y+DY[dir]*step;
-            if (step > 0 && freePedestrian(actor,nextX,nextY)) {
-                actor.x = nextX;
-                actor.y = nextY;
-                actor.dir = dir;
-                actor.moving = true;
-                actor.stride = (actor.stride+elapsed)%32;
+        if(actor.duty==Street.CHASE && actor.detour>0) {
+            actor.detour=Math.max(0,actor.detour-elapsed);
+            if(stepPedestrian(actor,actor.detourDir,elapsed*speed,elapsed)) return;
+            actor.detour=0;
+        }
+        if(stepPedestrian(actor,first,Math.min(elapsed*speed,absolute(first<LEFT?dy:dx)),elapsed) ||
+           stepPedestrian(actor,second,Math.min(elapsed*speed,absolute(second<LEFT?dy:dx)),elapsed)) return;
+        if(actor.duty!=Street.CHASE || absolute(dx)+absolute(dy)<20*UNIT) return;
+        int p=first<LEFT?LEFT:UP;
+        for(int i=0;i<2;i++) {
+            int against=p+(i+(actor.model+ticks/15)%2)%2;
+            if(stepPedestrian(actor,against,elapsed*speed,elapsed)) {
+                actor.detour=6;
+                actor.detourDir=against;
                 return;
             }
         }
+    }
+
+    private boolean stepPedestrian(Actor a,int dir,int step,int elapsed) {
+        if(step<=0) return false;
+        int x=a.x+DX[dir]*step,y=a.y+DY[dir]*step;
+        if(!freePedestrian(a,x,y)) return false;
+        a.x=x; a.y=y; a.dir=dir;
+        a.moving=true;
+        a.stride=(a.stride+elapsed)%32;
+        return true;
     }
 
     private void patrol(Actor actor, int elapsed) {
         actor.moving = false;
         if (actor.wait > 0) {
             actor.wait -= elapsed;
+            if(!actor.vehicle && actor.wait>15 && ticks%30==0) faceNeighbor(actor);
             return;
         }
         int dx = actor.route[actor.waypoint] * UNIT - actor.x;
@@ -572,7 +684,8 @@ final class District {
             int ahead = Math.min(remaining, 10 * UNIT);
             boolean clearAhead = freeVehicle(actor, actor.x + DX[dir] * ahead,
                                              actor.y + DY[dir] * ahead, dir);
-            int cruise = actor.duty == Street.CHASE ? 510+wanted*85 : (actor.model == 3 ? 350 : 410);
+            int cruise=actor.model==10?490:actor.duty==Street.CHASE?510+wanted*85:
+                    actor.model==3?350:390+actor.model*7;
             actor.speed = changeVelocity(actor.speed, clearAhead ? cruise : 86, actor.model);
             step = actor.speed * elapsed;
         } else {
@@ -616,7 +729,7 @@ final class District {
         int best = Integer.MAX_VALUE;
         for (int i = 0; i < street.length; i++) {
             Actor a = street[i];
-            if (!a.vehicle || a.deferred || a.role == Street.POLICE || a.role==Street.EMS) continue;
+            if (!a.vehicle || a.deferred || a.officer() || a.role==Street.ARMOR || a.role==Street.EMS) continue;
             int dx = absolute(a.x-heroX)/UNIT, dy = absolute(a.y-heroY)/UNIT;
             int score = dx*dx+dy*dy;
             if (score >= best || a.speed > 420 || dx > 48 || dy > 48) continue;
@@ -668,6 +781,13 @@ final class District {
 
     static int halfHeight(int dir, int model) {
         return carHalfHeight(dir) + (model >= 2 ? (model == 3 && dir < LEFT ? 4 : 2) : 0);
+    }
+
+    void recoil() {
+        if(driving) return;
+        int x=heroX-DX[heroDir]*UNIT*2,y=heroY-DY[heroDir]*UNIT*2;
+        if(freeHero(x,y)) { heroX=x; heroY=y; }
+        walking=running=false;
     }
 
     private boolean freeHero(int x, int y) { return freePedestrian(null, x, y); }
