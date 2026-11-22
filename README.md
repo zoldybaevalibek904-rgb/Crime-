@@ -1,4 +1,4 @@
-# CRIME DISTRICT · Alpha 0.2.1
+# CRIME DISTRICT · Alpha 0.2.2
 
 Офлайн-игра для Java ME MIDP 2.0 / CLDC 1.1. Downtown занимает
 768×704 пикселя при размере тайла 16×16. Игровой экран рассчитан на 240×320
@@ -6,8 +6,8 @@
 
 ## Запуск
 
-Скачайте `CrimeDistrict_Alpha021.jar` и `CrimeDistrict_Alpha021.jad` из
-GitHub Actions artifact `crime-district-alpha021` или из каталога `dist/`
+Скачайте `CrimeDistrict_Alpha022.jar` и `CrimeDistrict_Alpha022.jad` из
+GitHub Actions artifact `crime-district-alpha022` или из каталога `dist/`
 в ветке `work`. Храните JAD и JAR рядом под исходными именами.
 В J2ME Loader импортируйте MIDlet и выберите портретный экран 240×320.
 

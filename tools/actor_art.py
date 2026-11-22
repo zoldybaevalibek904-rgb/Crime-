@@ -128,15 +128,15 @@ def finish_vehicle(frame, model, direction):
             draw.line([(19,36),(28,36)], fill="#ccbbad")
     elif model == 3:
         x = 25 if direction == 2 else 7
-        draw.line([(x,13),(x+13,13)], fill="#ddcabb")
-        draw.line([(x+1,15),(x+13,15)], fill="#9f9087")
+        draw.line([(x,6),(x+13,6)], fill="#ddcabb")
+        draw.line([(x+1,8),(x+13,8)], fill="#9f9087")
     elif model == 1:
         # A roof plate occupies the upper edge in profile and the roof in
         # the two axial views. The lettering always faces the screen.
         if direction == 0:
             draw.polygon([(17,26),(30,26),(29,30),(18,30)], fill="#29343f")
             draw.line([(18,27),(29,27)], fill="#465668")
-        x, y = ((18,16),(18,18),(17,14),(19,14))[direction]
+        x, y = ((18,16),(18,18),(17,6),(19,6))[direction]
         draw.rectangle((x,y,x+11,y+5), fill="#35282b")
         draw.rectangle((x+1,y+1,x+10,y+4), fill="#e6bc6b")
         glyphs = ((7,2,2),(2,7,5),(5,2,5),(1,1,1))
@@ -155,14 +155,15 @@ def vehicles(source):
         cell = 44 if model == 0 else 48
         for direction, heading in enumerate((1, 0, 2, 3)):
             bounds = family[heading]
-            x0, y0, x1, y1 = bounds
             if direction < 2:
                 height = (39, 39, 42, 45)[model]
-                width = (19, 19, 22, 23)[model]
+                width = (23, 23, 26, 27)[model]
                 ground = (cell-height)//2
             else:
                 width = (40, 41, 44, 46)[model]
-                height = round(width*(y1-y0)/(x1-x0))
+                # Give the side views enough height to read at 240×320.
+                # Maintain wheel contact and the established road footprint.
+                height = (27, 28, 30, 31)[model]
                 ground = cell//2 + (10 if model >= 2 else 9) - height
             left = (cell-width)//2
             frame = shadow((cell, cell), (left, ground+height-4, left+width-1, min(cell-1, ground+height+1)))

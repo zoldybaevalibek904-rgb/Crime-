@@ -2,7 +2,7 @@ from pathlib import Path
 from struct import unpack_from
 from zipfile import ZipFile
 
-jar = Path("dist/CrimeDistrict_Alpha021.jar")
+jar = Path("dist/CrimeDistrict_Alpha022.jar")
 jad = dict(line.split(": ", 1) for line in jar.with_suffix(".jad").read_text().splitlines())
 assert jad["MIDlet-Jar-URL"] == jar.name
 assert int(jad["MIDlet-Jar-Size"]) == jar.stat().st_size

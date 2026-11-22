@@ -382,7 +382,7 @@ public final class CrimeDistrict extends MIDlet {
             g.setFont(headline);
             text(g, state == TITLE ? "CRIME DISTRICT" : "PAUSED", center, y + 12, true, 0xffe0aa);
             g.setFont(label);
-            text(g, state == TITLE ? "DOWNTOWN  /  ALPHA 0.2.1" : "DOWNTOWN",
+            text(g, state == TITLE ? "DOWNTOWN  /  ALPHA 0.2.2" : "DOWNTOWN",
                  center, y + 41, true, 0xc8a58c);
             for (int i = 0; i < 2; i++) {
                 int line = y + 65 + i * 25;
