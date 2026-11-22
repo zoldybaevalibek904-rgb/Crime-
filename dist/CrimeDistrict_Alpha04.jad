@@ -5,4 +5,4 @@ MIDlet-1: Crime District,,crimedistrict.CrimeDistrict
 MicroEdition-Configuration: CLDC-1.1
 MicroEdition-Profile: MIDP-2.0
 MIDlet-Jar-URL: CrimeDistrict_Alpha04.jar
-MIDlet-Jar-Size: 176542
+MIDlet-Jar-Size: 176619

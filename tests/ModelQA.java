@@ -379,16 +379,28 @@ public class ModelQA {
             delay=eta;
             District.Actor ems=vehicle(d,5,Street.EMS);
             int arrival=-1;
+            boolean attended=false;
             while(d.ticks<eta+105) {
                 frame(d,0);
                 if (d.ems.arrivals!=0 && arrival<0) arrival=d.ticks;
+                for (District.Actor a:d.street) if (a.role==Street.MEDIC && !a.deferred) attended=true;
             }
+            check(attended,"medic exits the ambulance onto a free surface");
             check(arrival>=300 && arrival<=600,"ambulance reaches roadway in 10–20 seconds ("+arrival+")");
             check(victim.removed && victim.deferred,"medic clears casualty after scene treatment");
             foot(d,500,650);
             steps(d,0,16);
             check(ems.deferred,"service vehicle leaves outside the viewport");
         }
+        d.reset();
+        foot(d,2270,1750);
+        District.Actor remote=pose(d.street[1],10,1374);
+        remote.hp=0;
+        remote.fallen=d.ticks;
+        d.ems.request(d,remote);
+        steps(d,0,630);
+        check(d.ems.fallback==1 && d.ems.arrivals==0 && remote.removed,
+              "no road coverage uses off-screen cleanup without teleporting an ambulance");
     }
 
     private static void tradesAndNewStory(District d) throws Exception {

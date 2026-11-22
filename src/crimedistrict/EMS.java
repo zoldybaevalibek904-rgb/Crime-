@@ -80,8 +80,10 @@ final class EMS {
                 state=SERVICE;
                 limit=d.ticks+100;
                 for (int i=0;i<4;i++) {
-                    int x=truck.x+District.DX[i]*13*District.UNIT;
-                    int y=truck.y+District.DY[i]*13*District.UNIT;
+                    int width=District.halfWidth(truck.dir,truck.model)+6;
+                    int height=District.halfHeight(truck.dir,truck.model)+5;
+                    int x=truck.x+District.DX[i]*width*District.UNIT;
+                    int y=truck.y+District.DY[i]*height*District.UNIT;
                     if (!d.pedestrianSpace(medic,x,y)) continue;
                     medic.x=x; medic.y=y; medic.dir=i;
                     medic.deferred=false; break;
