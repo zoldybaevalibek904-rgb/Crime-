@@ -12,36 +12,39 @@ final class District {
     static final int UNIT = 256;
     static final int HERO_SPEED = 360;
     static final int CAR_SPEED = 920;
-    static final int PEDESTRIAN_MODELS = 6;
-    private static final int ACCELERATION = 64;
-    private static final int BRAKE = 106;
-    private static final int[] PICKUP = {274, 257};
-    private static final int[] DELIVERY = {435, 534};
-    static final int TO_PICKUP = 0, TO_DELIVERY = 1, COMPLETE = 2;
-
-    // The same Downtown streets and sidewalks serve both the player and these routes.
-    private static final int[][] ROUTES = {
-        {306, 173, 452, 173, 452, 158, 444, 158, 444, 173},
-        {306, 259, 480, 259, 480, 274, 306, 274},
-        {315, 451, 482, 451, 482, 460, 315, 460},
-        {40, 155, 126, 155, 126, 170, 40, 170},
-        {617, 159, 689, 159, 689, 173, 617, 173},
-        {620, 447, 711, 447, 711, 459, 620, 459},
-    };
-
-    private static final int[] TRAFFIC_ROUTE = {199, 194, 561, 194, 561, 490, 199, 490};
+    static final int PEDESTRIAN_MODELS = 25;
+    static final int ROAD = 0, SIDEWALK = 1, BUILDING = 2, SAND = 3, WATER = 4, PARKING = 5, DECOR = 6, BLOCKED = 7;
+    private static final int[] LIMIT = {920, 860, 790, 690, 920};
+    private static final int[] ACCEL = {64, 79, 52, 42, 64};
+    private static final int[] BRAKE = {106, 128, 90, 73, 106};
 
     static final class Actor {
-        final int model;
+        final int model, role, startX, startY, startDir, startWaypoint;
         final boolean vehicle;
         final int[] route;
-        int x, y, dir, waypoint, wait, stride, speed, blocked, routeStep;
-        boolean moving;
+        int x, y, dir, waypoint, wait, stride, speed, blocked, routeStep, duty;
+        boolean moving, claimed, deferred;
 
-        Actor(int model, boolean vehicle, int[] route) {
+        Actor(int model, boolean vehicle, int role, int x, int y, int dir, int waypoint, int[] route) {
             this.model = model;
             this.vehicle = vehicle;
+            this.role = role;
             this.route = route;
+            startX = x*UNIT;
+            startY = y*UNIT;
+            startDir = dir;
+            startWaypoint = waypoint;
+        }
+
+        void reset() {
+            x = startX;
+            y = startY;
+            dir = startDir;
+            waypoint = startWaypoint;
+            wait = stride = speed = blocked = 0;
+            routeStep = 2;
+            moving = claimed = deferred = false;
+            duty = route.length > 2 ? Street.PATROL : Street.IDLE;
         }
     }
 
@@ -50,23 +53,21 @@ final class District {
     }
 
     final int columns, rows, width, height;
-    final byte[] tiles;
+    final byte[] tiles, zones;
     final Prop[] props;
-    final Actor[] street = {
-        new Actor(1, false, ROUTES[0]), new Actor(2, false, ROUTES[1]),
-        new Actor(3, false, ROUTES[2]), new Actor(4, false, ROUTES[3]),
-        new Actor(5, false, ROUTES[4]), new Actor(6, false, ROUTES[5]),
-        new Actor(1, true, TRAFFIC_ROUTE), new Actor(2, true, TRAFFIC_ROUTE),
-        new Actor(3, true, TRAFFIC_ROUTE)
-    };
-    int heroX, heroY, carX, carY, heroDir, carDir;
-    private int velocityX, velocityY, ticks;
-    int mission, celebration;
+    private final Prop[][] solidBands;
+    final Actor[] street = Street.populate();
+    final Story story = new Story();
+    Actor car;
+    int heroX, heroY, heroDir;
+    private int velocityX, velocityY;
+    int ticks, wanted, unseen, notice;
+    private int offenceCooldown, caught;
     int cameraX, cameraY, stride;
     boolean driving, walking;
 
     District(InputStream stream) throws IOException {
-        if (stream == null) throw new IOException("Missing Downtown map");
+        if (stream == null) throw new IOException("Missing city map");
         DataInputStream in = new DataInputStream(stream);
         try {
             columns = in.readUnsignedByte();
@@ -74,7 +75,9 @@ final class District {
             width = columns * 16;
             height = rows * 16;
             tiles = new byte[columns * rows];
+            zones = new byte[tiles.length];
             in.readFully(tiles);
+            in.readFully(zones);
             props = new Prop[in.readUnsignedShort()];
             for (int i = 0; i < props.length; i++) {
                 Prop p = new Prop();
@@ -91,80 +94,130 @@ final class District {
         } finally {
             in.close();
         }
+        solidBands = new Prop[(height+63)/64][];
+        for (int band = 0; band < solidBands.length; band++) {
+            int count = 0;
+            for (int i = 0; i < props.length; i++) if (inBand(props[i],band)) count++;
+            Prop[] bucket = new Prop[count];
+            count = 0;
+            for (int i = 0; i < props.length; i++) if (inBand(props[i],band)) bucket[count++] = props[i];
+            solidBands[band] = bucket;
+        }
         reset();
+    }
+
+    private static boolean inBand(Prop p, int band) {
+        return p.width > 0 && p.top < (band+1)*64 && p.depth > band*64;
     }
 
     void reset() {
         heroX = 226 * UNIT;
         heroY = 218 * UNIT;
-        carX = 267 * UNIT;
-        carY = 229 * UNIT;
         heroDir = DOWN;
-        carDir = RIGHT;
         walking = driving = false;
-        velocityX = velocityY = stride = ticks = celebration = 0;
-        mission = TO_PICKUP;
-        place(street[0], 323, 173, RIGHT, 2);
-        place(street[1], 347, 259, RIGHT, 2);
-        place(street[2], 451, 460, LEFT, 6);
-        place(street[3], 122, 170, LEFT, 6);
-        place(street[4], 640, 159, RIGHT, 2);
-        place(street[5], 684, 459, LEFT, 6);
-        place(street[6], 336, 194, RIGHT, 2);
-        place(street[7], 561, 320, DOWN, 4);
-        place(street[8], 404, 490, LEFT, 6);
+        velocityX = velocityY = stride = ticks = wanted = unseen = offenceCooldown = caught = notice = 0;
+        story.reset();
+        for (int i = 0; i < street.length; i++) street[i].reset();
+        car = street[0];
         cameraX = heroX;
         cameraY = heroY;
     }
 
-    private void place(Actor actor, int x, int y, int dir, int waypoint) {
-        actor.x = x * UNIT;
-        actor.y = y * UNIT;
-        actor.dir = dir;
-        actor.waypoint = waypoint;
-        actor.routeStep = 2;
-        actor.wait = actor.stride = actor.speed = actor.blocked = 0;
-        actor.moving = false;
+    int focusX() { return driving ? car.x : heroX; }
+    int focusY() { return driving ? car.y : heroY; }
+    int sector() { return (focusX()/UNIT >= 768 ? 1 : 0) + (focusY()/UNIT >= 704 ? 2 : 0); }
+
+    int tileAt(int x, int y) {
+        return tiles[y*columns+x] & 255;
     }
 
     void tick(boolean up, boolean down, boolean left, boolean right, boolean action) {
         if (action) {
             if (driving) {
                 if (canLeaveCar()) leaveCar();
-            } else if (nearCar()) {
-                driving = true;
-                velocityX = velocityY = 0;
+            } else {
+                Actor next = nearbyCar();
+                if (next != null) {
+                    car = next;
+                    if (!car.claimed && car.role == Street.CIVILIAN) offence();
+                    car.claimed = true;
+                    car.speed = velocityX = velocityY = 0;
+                    driving = true;
+                }
             }
         }
         if (driving) drive(up, down, left, right);
         else walk(up, down, left, right);
 
         ticks++;
+        if (offenceCooldown > 0) offenceCooldown--;
+        if (notice > 0) notice--;
+        boolean seen = false;
         for (int i = 0; i < street.length; i++) {
             Actor actor = street[i];
-            boolean distant = absolute(actor.x - cameraX) > 180 * UNIT
-                           || absolute(actor.y - cameraY) > 220 * UNIT;
-            if (!distant || ((ticks + i) & 1) == 0) patrol(actor, distant ? 2 : 1);
+            if (actor.deferred) {
+                if (((ticks+i)&31) != 0 || distance(actor,focusX(),focusY()) < 235 || !spawnClear(actor)) continue;
+                actor.deferred = false;
+            }
+            if (actor.claimed || (actor.vehicle && actor.route.length == 0)) continue;
+            int distance = distance(actor, focusX(), focusY());
+            boolean distant = absolute(actor.x-cameraX) > 176*UNIT || absolute(actor.y-cameraY) > 216*UNIT;
+            if (actor.role == Street.POLICE && wanted > 0 && distance < sightRange() &&
+                visible(actor.x, actor.y, focusX(), focusY())) seen = true;
+            if (distant && (((ticks+i)&3) != 0 || distance > 540)) continue;
+            updateActor(actor, distant ? 4 : 1, distance);
         }
-        updateMission();
+        if (wanted > 0) {
+            if (seen) {
+                unseen = 0;
+                if (!driving && policeAtFeet()) {
+                    if (++caught >= 46) {
+                        wanted = caught = 0;
+                        notice = 90;
+                        story.caught();
+                    }
+                } else caught = 0;
+            } else {
+                caught = 0;
+                if (++unseen >= 180) { unseen = 0; wanted--; }
+            }
+        }
+        story.tick(this);
     }
 
-    int targetX() { return (mission == TO_PICKUP ? PICKUP : DELIVERY)[0]; }
-    int targetY() { return (mission == TO_PICKUP ? PICKUP : DELIVERY)[1]; }
+    void offence() {
+        wanted = Math.min(3, wanted+1);
+        unseen = 0;
+    }
 
-    private void updateMission() {
-        if (mission == COMPLETE) {
-            if (celebration > 0) celebration--;
-            return;
+    private int sightRange() { return 90 + wanted*34; }
+
+    private boolean policeAtFeet() {
+        for (int i = 0; i < street.length; i++) {
+            Actor a = street[i];
+            if (!a.deferred && a.role == Street.POLICE && !a.vehicle && distance(a,heroX,heroY) <= 13 &&
+                visible(a.x,a.y,heroX,heroY)) return true;
         }
-        if (driving != (mission == TO_DELIVERY)) return;
-        int x = (driving ? carX : heroX) / UNIT - targetX();
-        int y = (driving ? carY : heroY) / UNIT - targetY();
-        int radius = driving ? 15 : 12;
-        if (x*x + y*y <= radius*radius) {
-            mission++;
-            if (mission == COMPLETE) celebration = 105;
+        return false;
+    }
+
+    private static int distance(Actor a, int x, int y) {
+        return (absolute(a.x-x)+absolute(a.y-y))/UNIT;
+    }
+
+    private boolean visible(int x, int y, int targetX, int targetY) {
+        return pathClear(x,y,targetX,targetY,8,0);
+    }
+
+    private boolean pathClear(int x, int y, int targetX, int targetY, int spacing, int padding) {
+        int length = (absolute(targetX-x)+absolute(targetY-y))/UNIT;
+        int steps = (length+spacing-1)/spacing;
+        for (int i = 1; i < steps; i++) {
+            int xx = (x+(targetX-x)*i/steps)/UNIT;
+            int yy = (y+(targetY-y)*i/steps)/UNIT;
+            if (!clear(xx-padding,yy-padding,1+2*padding,1+2*padding)) return false;
         }
+        return true;
     }
 
     private void walk(boolean up, boolean down, boolean left, boolean right) {
@@ -189,12 +242,13 @@ final class District {
     private void drive(boolean up, boolean down, boolean left, boolean right) {
         int dx = (right ? 1 : 0) - (left ? 1 : 0);
         int dy = (down ? 1 : 0) - (up ? 1 : 0);
-        int limit = dx != 0 && dy != 0 ? CAR_SPEED * 181 / UNIT : CAR_SPEED;
-        velocityX = changeVelocity(velocityX, dx * limit);
-        velocityY = changeVelocity(velocityY, dy * limit);
+        int maximum = LIMIT[car.model];
+        int limit = dx != 0 && dy != 0 ? maximum * 181 / UNIT : maximum;
+        velocityX = changeVelocity(velocityX, dx * limit, car.model);
+        velocityY = changeVelocity(velocityY, dy * limit, car.model);
         // Turning and braking can temporarily mix old and new velocity components.
         int squared = velocityX * velocityX + velocityY * velocityY;
-        if (squared > CAR_SPEED * CAR_SPEED) {
+        if (squared > maximum * maximum) {
             int length = absolute(velocityX) + absolute(velocityY);
             int estimate = (length + squared / length) / 2;
             while (estimate < length) {
@@ -202,28 +256,50 @@ final class District {
                 estimate = (length + squared / length) / 2;
             }
             if (length * length < squared) length++;
-            velocityX = velocityX * CAR_SPEED / length;
-            velocityY = velocityY * CAR_SPEED / length;
+            velocityX = velocityX * maximum / length;
+            velocityY = velocityY * maximum / length;
         }
-        int next = direction(velocityX, velocityY, carDir);
-        if (next != carDir) {
-            if (freeVehicle(null, carX, carY, next)) carDir = next;
-            else if ((next < LEFT) != (carDir < LEFT)) {
-                if (carDir < LEFT) velocityX = 0;
+        int next = direction(velocityX, velocityY, car.dir);
+        if (next != car.dir) {
+            if (freeVehicle(car, car.x, car.y, next)) car.dir = next;
+            else if ((next < LEFT) != (car.dir < LEFT)) {
+                if (car.dir < LEFT) velocityX = 0;
                 else velocityY = 0;
             }
         }
-        if (freeVehicle(null, carX + velocityX, carY, carDir)) carX += velocityX;
-        else velocityX = 0;
-        if (freeVehicle(null, carX, carY + velocityY, carDir)) carY += velocityY;
-        else velocityY = 0;
-        next = direction(velocityX, velocityY, carDir);
-        if (next != carDir && freeVehicle(null, carX, carY, next)) carDir = next;
+        if (velocityX != 0) {
+            if (freeVehicle(car, car.x + velocityX, car.y, car.dir)) car.x += velocityX;
+            else impact(velocityX, 0);
+        }
+        if (velocityY != 0) {
+            if (freeVehicle(car, car.x, car.y + velocityY, car.dir)) car.y += velocityY;
+            else impact(0, velocityY);
+        }
+        next = direction(velocityX, velocityY, car.dir);
+        if (next != car.dir && freeVehicle(car, car.x, car.y, next)) car.dir = next;
     }
 
-    private static int changeVelocity(int current, int target) {
+    private void impact(int dx, int dy) {
+        if (offenceCooldown == 0) {
+            int x = (car.x+dx)/UNIT, y = (car.y+dy)/UNIT;
+            for (int i = 0; i < street.length; i++) {
+                Actor other = street[i];
+                if (!other.deferred && other.role == Street.POLICE && other.vehicle &&
+                    touch(x,y,halfWidth(car.dir,car.model),halfHeight(car.dir,car.model),
+                          other.x,other.y,halfWidth(other.dir,other.model),halfHeight(other.dir,other.model))) {
+                    offence();
+                    offenceCooldown = 90;
+                    break;
+                }
+            }
+        }
+        if (dx != 0) velocityX = 0;
+        if (dy != 0) velocityY = 0;
+    }
+
+    private static int changeVelocity(int current, int target, int model) {
         if (target != 0 && current * target < 0) current = 0;
-        int step = absolute(target) < absolute(current) ? BRAKE : ACCELERATION;
+        int step = absolute(target) < absolute(current) ? BRAKE[model] : ACCEL[model];
         return current < target ? Math.min(current + step, target) : Math.max(current - step, target);
     }
 
@@ -238,6 +314,82 @@ final class District {
         return Math.max(absolute(velocityX), absolute(velocityY)) <= UNIT;
     }
 
+    private void updateActor(Actor actor, int elapsed, int distance) {
+        actor.moving = false;
+        if (actor.vehicle) {
+            if (actor.role == Street.POLICE) {
+                actor.duty = wanted > 0 && distance < 145+wanted*45 ? Street.CHASE : Street.PATROL;
+            }
+            patrol(actor, elapsed);
+            return;
+        }
+        boolean police = actor.role == Street.POLICE;
+        boolean gang = actor.role == Street.RED || actor.role == Street.IRON;
+        boolean hostile = police ? wanted > 0 : gang && story.gangAlert();
+        int homeDistance = (absolute(actor.x-actor.startX)+absolute(actor.y-actor.startY))/UNIT;
+        if ((police || gang) && hostile && homeDistance < (police ? 205 : 88) &&
+            distance < (police ? sightRange() : 70) &&
+            (actor.duty == Street.CHASE || visible(actor.x, actor.y, focusX(), focusY()))) {
+            actor.duty = Street.CHASE;
+            manoeuvre(actor, focusX(), focusY(), elapsed, police ? (323+wanted*42) : 300);
+            return;
+        }
+        if (actor.duty == Street.CHASE || actor.duty == Street.RETURN) {
+            actor.duty = Street.RETURN;
+            if (homeDistance > 2) {
+                manoeuvre(actor, actor.startX, actor.startY, elapsed, 270);
+                return;
+            }
+            // Recover the authored lane when the actor has returned to its post.
+            if (!freePedestrian(actor, actor.startX, actor.startY)) return;
+            actor.x = actor.startX;
+            actor.y = actor.startY;
+            actor.waypoint = actor.startWaypoint;
+            actor.routeStep = 2;
+            actor.duty = Street.PATROL;
+        }
+        if (gang && distance < 39) {
+            actor.duty = Street.ALERT;
+            actor.dir = direction(focusX()-actor.x,focusY()-actor.y,actor.dir);
+            return;
+        }
+        actor.duty = actor.route.length > 2 ? Street.PATROL : Street.IDLE;
+        if (nearMovingVehicle(actor)) {
+            actor.wait = 12;
+            return;
+        }
+        if (actor.duty == Street.PATROL) patrol(actor, elapsed);
+    }
+
+    private boolean nearMovingVehicle(Actor pedestrian) {
+        for (int i = 0; i < street.length; i++) {
+            Actor a = street[i];
+            if (a.vehicle && (a.speed > 150 || (driving && a == car &&
+                    absolute(velocityX)+absolute(velocityY) > 200)) &&
+                    distance(a,pedestrian.x,pedestrian.y) < 29) return true;
+        }
+        return false;
+    }
+
+    private void manoeuvre(Actor actor, int x, int y, int elapsed, int speed) {
+        int dx = x-actor.x, dy = y-actor.y;
+        int first = direction(dx,dy,actor.dir);
+        int second = first < LEFT ? (dx < 0 ? LEFT : RIGHT) : (dy < 0 ? UP : DOWN);
+        for (int i = 0; i < 2; i++) {
+            int dir = i == 0 ? first : second;
+            int step = Math.min(elapsed*speed, absolute(dir < LEFT ? dy : dx));
+            int nextX = actor.x+DX[dir]*step, nextY = actor.y+DY[dir]*step;
+            if (step > 0 && freePedestrian(actor,nextX,nextY)) {
+                actor.x = nextX;
+                actor.y = nextY;
+                actor.dir = dir;
+                actor.moving = true;
+                actor.stride = (actor.stride+elapsed)%32;
+                return;
+            }
+        }
+    }
+
     private void patrol(Actor actor, int elapsed) {
         actor.moving = false;
         if (actor.wait > 0) {
@@ -247,6 +399,7 @@ final class District {
         int dx = actor.route[actor.waypoint] * UNIT - actor.x;
         int dy = actor.route[actor.waypoint + 1] * UNIT - actor.y;
         if (dx == 0 && dy == 0) {
+            if (actor.vehicle && actor.duty == Street.CHASE) turnTowardPlayer(actor);
             nextWaypoint(actor);
             if (!actor.vehicle) {
                 actor.wait = 20 + actor.model * 11;
@@ -262,10 +415,11 @@ final class District {
             int ahead = Math.min(remaining, 10 * UNIT);
             boolean clearAhead = freeVehicle(actor, actor.x + DX[dir] * ahead,
                                              actor.y + DY[dir] * ahead, dir);
-            actor.speed = changeVelocity(actor.speed, clearAhead ? 410 : 86);
+            int cruise = actor.duty == Street.CHASE ? 510+wanted*85 : (actor.model == 3 ? 350 : 410);
+            actor.speed = changeVelocity(actor.speed, clearAhead ? cruise : 86, actor.model);
             step = actor.speed * elapsed;
         } else {
-            step = (195 + actor.model * 18) * elapsed;
+            step = (192 + (actor.model*23)%97) * elapsed;
         }
         step = Math.min(step, remaining);
         int x = actor.x + DX[dir] * step, y = actor.y + DY[dir] * step;
@@ -286,28 +440,51 @@ final class District {
         }
     }
 
+    private void turnTowardPlayer(Actor actor) {
+        int ahead = (actor.waypoint+2)%actor.route.length;
+        int behind = (actor.waypoint+actor.route.length-2)%actor.route.length;
+        int x = focusX()/UNIT, y = focusY()/UNIT;
+        int costAhead = absolute(actor.route[ahead]-x)+absolute(actor.route[ahead+1]-y);
+        int costBehind = absolute(actor.route[behind]-x)+absolute(actor.route[behind+1]-y);
+        if (costAhead+36 < costBehind) actor.routeStep = 2;
+        else if (costBehind+36 < costAhead) actor.routeStep = -2;
+    }
+
     private void nextWaypoint(Actor actor) {
         actor.waypoint = (actor.waypoint + actor.routeStep + actor.route.length) % actor.route.length;
     }
 
-    boolean nearCar() {
-        return absolute(heroX - carX) <= (carHalfWidth(carDir) + 23) * UNIT
-            && absolute(heroY - carY) <= (carHalfHeight(carDir) + 19) * UNIT
-            && clearDoorPath(heroX, heroY);
+    Actor nearbyCar() {
+        Actor closest = null;
+        int best = Integer.MAX_VALUE;
+        for (int i = 0; i < street.length; i++) {
+            Actor a = street[i];
+            if (!a.vehicle || a.deferred || a.role == Street.POLICE) continue;
+            int dx = absolute(a.x-heroX)/UNIT, dy = absolute(a.y-heroY)/UNIT;
+            int score = dx*dx+dy*dy;
+            if (score >= best || a.speed > 420 || dx > 48 || dy > 48) continue;
+            int side = Math.max(0,dx-halfWidth(a.dir,a.model));
+            int end = Math.max(0,dy-halfHeight(a.dir,a.model));
+            if (side*side+end*end <= 24*24 && pathClear(a.x,a.y,heroX,heroY,3,1)) {
+                best = score;
+                closest = a;
+            }
+        }
+        return closest;
     }
 
     private void leaveCar() {
-        int first = carDir < LEFT ? LEFT : UP;
+        int first = car.dir < LEFT ? LEFT : UP;
         int bestDistance = Integer.MAX_VALUE;
         int bestX = heroX, bestY = heroY, bestDirection = heroDir;
         for (int i = 0; i < 4; i++) {
             int dir = (first + i) % 4;
-            int edge = dir < LEFT ? carHalfHeight(carDir) + 5 : carHalfWidth(carDir) + 7;
+            int edge = dir < LEFT ? halfHeight(car.dir,car.model) + 5 : halfWidth(car.dir,car.model) + 7;
             for (int offset = -8; offset <= 8; offset += 8) {
-                int x = carX + (DX[dir] * edge + (dir < LEFT ? offset : 0)) * UNIT;
-                int y = carY + (DY[dir] * edge + (dir >= LEFT ? offset : 0)) * UNIT;
+                int x = car.x + (DX[dir] * edge + (dir < LEFT ? offset : 0)) * UNIT;
+                int y = car.y + (DY[dir] * edge + (dir >= LEFT ? offset : 0)) * UNIT;
                 int distance = edge + absolute(offset);
-                if (distance < bestDistance && freeHero(x, y) && clearDoorPath(x, y)) {
+                if (distance < bestDistance && freeHero(x, y) && pathClear(car.x,car.y,x,y,3,1)) {
                     bestDistance = distance;
                     bestX = x;
                     bestY = y;
@@ -322,15 +499,6 @@ final class District {
             driving = false;
             velocityX = velocityY = stride = 0;
         }
-    }
-
-    private boolean clearDoorPath(int x, int y) {
-        for (int part = 1; part <= 5; part++) {
-            int sampleX = (carX + (x - carX) * part / 6) / UNIT;
-            int sampleY = (carY + (y - carY) * part / 6) / UNIT;
-            if (!clear(sampleX - 3, sampleY - 2, 6, 4)) return false;
-        }
-        return true;
     }
 
     private static int absolute(int n) { return n < 0 ? -n : n; }
@@ -348,23 +516,23 @@ final class District {
     private boolean freeHero(int x, int y) { return freePedestrian(null, x, y); }
 
     private boolean freePedestrian(Actor actor, int x, int y) {
-        return clearActors(actor, x / UNIT, y / UNIT, 4, 3, false);
+        return clearActors(actor, x / UNIT, y / UNIT, 4, 3);
     }
 
     private boolean freeVehicle(Actor actor, int x, int y, int dir) {
-        int model = actor == null ? 0 : actor.model;
-        return clearActors(actor, x / UNIT, y / UNIT, halfWidth(dir, model), halfHeight(dir, model), true);
+        int model = actor.model;
+        int xx = x / UNIT, yy = y / UNIT;
+        if (xx >= 0 && xx < width && yy >= 0 && yy < height && zones[(yy/16)*columns+xx/16] == SAND)
+            return false;
+        return clearActors(actor, xx, yy, halfWidth(dir, model), halfHeight(dir, model));
     }
 
-    private boolean clearActors(Actor self, int x, int y, int w, int h, boolean vehicle) {
+    private boolean clearActors(Actor self, int x, int y, int w, int h) {
         if (!clear(x - w, y - h, w * 2, h * 2)) return false;
-        if (!vehicle || self != null) {
-            if (touch(x, y, w, h, carX, carY, carHalfWidth(carDir), carHalfHeight(carDir))) return false;
-        }
         if (self != null && !driving && touch(x, y, w, h, heroX, heroY, 4, 3)) return false;
         for (int i = 0; i < street.length; i++) {
             Actor other = street[i];
-            if (other == self) continue;
+            if (other == self || other.deferred) continue;
             int ow = other.vehicle ? halfWidth(other.dir, other.model) : 4;
             int oh = other.vehicle ? halfHeight(other.dir, other.model) : 3;
             if (touch(x, y, w, h, other.x, other.y, ow, oh)) return false;
@@ -376,11 +544,35 @@ final class District {
         return absolute(x - fx / UNIT) < w + ow && absolute(y - fy / UNIT) < h + oh;
     }
 
+    void deferObstructedSpawns() {
+        for (int i = 0; i < street.length; i++) {
+            Actor a = street[i];
+            if (!a.claimed && !spawnClear(a)) a.deferred = true;
+        }
+    }
+
+    private boolean spawnClear(Actor actor) {
+        if (distance(actor,focusX(),focusY()) < 28) return false;
+        return actor.vehicle ? freeVehicle(actor,actor.x,actor.y,actor.dir)
+                             : freePedestrian(actor,actor.x,actor.y);
+    }
+
+    boolean freeStatic(int x, int y, int w, int h) { return clear(x,y,w,h); }
+
     private boolean clear(int x, int y, int w, int h) {
         if (x < 0 || y < 0 || x + w > width || y + h > height) return false;
-        for (int i = 0; i < props.length; i++) {
-            Prop p = props[i];
-            if (p.depth > y && p.width > 0 && overlaps(x, y, w, h, p.left, p.top, p.width, p.height)) return false;
+        for (int row = y/16; row <= (y+h-1)/16; row++) {
+            for (int col = x/16; col <= (x+w-1)/16; col++) {
+                int zone = zones[row*columns+col];
+                if (zone == WATER || zone == BLOCKED) return false;
+            }
+        }
+        for (int band = y/64; band <= (y+h-1)/64; band++) {
+            Prop[] bucket = solidBands[band];
+            for (int i = 0; i < bucket.length; i++) {
+                Prop p = bucket[i];
+                if (overlaps(x,y,w,h,p.left,p.top,p.width,p.height)) return false;
+            }
         }
         return true;
     }
@@ -390,8 +582,8 @@ final class District {
     }
 
     void follow(int viewportWidth, int viewportHeight) {
-        int targetX = driving ? carX : heroX;
-        int targetY = driving ? carY : heroY;
+        int targetX = focusX() + (driving ? velocityX*3 : 0);
+        int targetY = focusY() + (driving ? velocityY*3 : 0);
         cameraX += (targetX - cameraX) / 5;
         cameraY += (targetY - cameraY) / 5;
         cameraX = clamp(cameraX, viewportWidth * UNIT / 2, (width - viewportWidth / 2) * UNIT);

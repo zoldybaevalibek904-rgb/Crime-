@@ -2,7 +2,7 @@ from pathlib import Path
 from struct import unpack_from
 from zipfile import ZipFile
 
-jar = Path("dist/CrimeDistrict_Alpha022.jar")
+jar = Path("dist/CrimeDistrict_Alpha03.jar")
 jad = dict(line.split(": ", 1) for line in jar.with_suffix(".jad").read_text().splitlines())
 assert jad["MIDlet-Jar-URL"] == jar.name
 assert int(jad["MIDlet-Jar-Size"]) == jar.stat().st_size
@@ -23,9 +23,9 @@ with ZipFile(jar) as package:
             assert package.read(name)[:8] == bytes.fromhex("cafebabe0003002d")
     assert b"\x00\x08StackMap" in package.read("crimedistrict/CrimeDistrict$Screen.class")
 
-    atlases = {"tiles": (128, 80), "walker": (96, 144), "sedan": (176, 44), "traffic": (192, 144)}
-    atlases.update((f"pedestrian{i}", (96, 144)) for i in range(1,7))
-    for name in [*atlases, *(f"prop{i}" for i in range(16))]:
+    atlases = {"tiles": (128, 112), "walker": (96, 144), "sedan": (176, 44), "traffic": (192, 144), "cruiser": (176, 44)}
+    atlases.update((f"pedestrian{i}", (96, 144)) for i in range(1,26))
+    for name in [*atlases, *(f"prop{i}" for i in range(25))]:
         image = package.read(name + ".png")
         assert image.startswith(b"\x89PNG\r\n\x1a\n")
         size = unpack_from(">II", image, 16)
@@ -36,11 +36,14 @@ with ZipFile(jar) as package:
         else:
             assert all(0 < edge <= 256 for edge in size)
 
-    world = package.read("downtown.bin")
+    world = package.read("city.bin")
     columns, rows = unpack_from(">BB", world)
     assert columns * 16 > 240 and rows * 16 > 320
     end_tiles = 2 + columns * rows
-    assert max(world[2:end_tiles]) < 40
+    assert max(world[2:end_tiles]) < 56
+    zones = world[end_tiles:end_tiles+columns*rows]
+    assert set(zones) == set(range(8))
+    end_tiles += columns*rows
     count, = unpack_from(">H", world, end_tiles)
     assert len(world) == end_tiles + 2 + 9 * count
     previous_depth = 0
@@ -50,7 +53,11 @@ with ZipFile(jar) as package:
         depth = y + top + height
         assert previous_depth <= depth <= rows * 16
         assert 0 <= x + left <= x + left + width <= columns * 16
+        if width:
+            for row in range((y+top)//16,(depth-1)//16+1):
+                for col in range((x+left)//16,(x+left+width-1)//16+1):
+                    assert zones[row*columns+col] not in (0,4,7), (kind,col,row)
         types.add(kind)
         previous_depth = depth
-    assert types == set(range(16))
+    assert types == set(range(25))
 print(f"Verified {jar} ({jar.stat().st_size} bytes), preverification, resources, and JAD")

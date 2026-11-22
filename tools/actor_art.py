@@ -113,6 +113,15 @@ def hero_frames(source):
 
 def finish_vehicle(frame, model, direction):
     draw = ImageDraw.Draw(frame)
+    if model in (0,2):
+        # Reflections on the native door trim and roof edge; retain window contrast.
+        if direction < 2:
+            x = frame.width//2 - (5 if model == 0 else 6)
+            draw.line([(x,17),(x,22),(x+1,23)],fill="#657486" if model == 0 else "#615861")
+        else:
+            y = 19
+            x = 24 if direction == 2 else 13
+            draw.line([(x,y),(x+6,y)],fill="#66788b" if model == 0 else "#746570")
     if model == 3 and direction < 2:
         # Hand-place the fluted panel and remove small matte holes from the
         # light paint. Glass, seams, lamps and trim remain from the artwork.
@@ -176,6 +185,28 @@ def vehicles(source):
                 traffic.paste(frame, (direction*cell, (model-1)*cell))
     save_indexed(sedan, ROOT / "sedan.png")
     save_indexed(traffic, ROOT / "traffic.png")
+
+
+def polish_hero(rows):
+    # Sparse stitched folds follow the existing native garment clusters.
+    folds = (
+        ((5,13),(6,14),(14,12),(14,16),(5,18),(13,19)),
+        ((5,13),(5,15),(14,13),(13,16),(5,18),(13,19)),
+        ((12,12),(13,13),(14,15),(12,17),(13,19)),
+        ((7,12),(6,13),(6,15),(7,17),(6,18)),
+    )
+    result = []
+    for direction,row in enumerate(rows):
+        polished = []
+        for pose in row:
+            frame = pose.copy()
+            for x,y in folds[direction]:
+                r,g,b,a = frame.getpixel((x,y))
+                if a == 255 and 36 <= r <= 77 and abs(r-b) < 22:
+                    frame.putpixel((x,y),(r+12,g+11,b+13,255))
+            polished.append(frame)
+        result.append(polished)
+    return result
 
 
 def pack_people(rows):
@@ -402,7 +433,7 @@ if __name__ == "__main__":
     if source.size != (1536, 1024):
         arguments.error("Expected the registered 1536×1024 Crime District sheet")
     hero = hero_frames(source)
-    save_indexed(pack_people(hero), ROOT / "walker.png")
+    save_indexed(pack_people(polish_hero(hero)), ROOT / "walker.png")
     for model in range(1, 7):
         save_indexed(pack_people(pedestrian_rows(hero, model)), ROOT / f"pedestrian{model}.png")
     vehicles(source)

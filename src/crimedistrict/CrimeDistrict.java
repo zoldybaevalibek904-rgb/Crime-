@@ -28,13 +28,18 @@ public final class CrimeDistrict extends MIDlet {
         private static final int TOP_LEFT = Graphics.TOP | Graphics.LEFT;
         private final Font label = Font.getFont(Font.FACE_SYSTEM, Font.STYLE_BOLD, Font.SIZE_SMALL);
         private final Font headline = Font.getFont(Font.FACE_SYSTEM, Font.STYLE_BOLD, Font.SIZE_LARGE);
-        private final Image[] props = new Image[16];
+        private final String[] SECTORS = {"DOWNTOWN","RESIDENTIAL","INDUSTRIAL","BEACH"};
+        private final Image[] props = new Image[25];
+        private final SaveGame saves = new SaveGame();
         private District city;
-        private Image tiles, sedan, traffic;
+        private Image tiles, sedan, traffic, cruiser;
         private final Image[] walkers = new Image[District.PEDESTRIAN_MODELS + 1];
+        private final int[] touched = new int[walkers.length];
+        private int savedRevision;
+        private boolean saveError, artFailure;
         private int[] drawOrder;
         private int[] drawDepth;
-        private static final int HERO = -2, SEDAN = -1;
+        private static final int HERO = -2;
         private volatile boolean active, closed;
         private Thread loop;
         private boolean bufferDirty = true;
@@ -44,14 +49,12 @@ public final class CrimeDistrict extends MIDlet {
             super(false);
             setFullScreenMode(true);
             try {
-                city = new District(getClass().getResourceAsStream("/downtown.bin"));
+                city = new District(getClass().getResourceAsStream("/city.bin"));
                 drawOrder = new int[city.street.length + 2];
                 drawDepth = new int[drawOrder.length];
                 tiles = Image.createImage("/tiles.png");
                 walkers[0] = Image.createImage("/walker.png");
-                for (int i = 1; i < walkers.length; i++) {
-                    walkers[i] = Image.createImage("/pedestrian" + i + ".png");
-                }
+                cruiser = Image.createImage("/cruiser.png");
                 traffic = Image.createImage("/traffic.png");
                 sedan = Image.createImage("/sedan.png");
                 for (int i = 0; i < props.length; i++) props[i] = Image.createImage("/prop" + i + ".png");
@@ -77,6 +80,7 @@ public final class CrimeDistrict extends MIDlet {
         }
 
         synchronized void stop() {
+            if (!closed && state == PLAY && !artFailure) checkpoint();
             closed = true;
             notifyAll();
         }
@@ -135,7 +139,11 @@ public final class CrimeDistrict extends MIDlet {
                     boolean refreshBuffer;
                     synchronized (this) {
                         while (!active && !closed) {
-                            if (state == PLAY) { state = PAUSE; selection = 0; }
+                            if (state == PLAY) {
+                                state = PAUSE;
+                                selection = 0;
+                                checkpoint();
+                            }
                             wait();
                             deadline = System.currentTimeMillis();
                         }
@@ -147,8 +155,11 @@ public final class CrimeDistrict extends MIDlet {
                         bufferDirty = false;
                     }
                     if (refreshBuffer) graphics = getGraphics();
-                    if (city != null) advance(keys | edges, edges);
-                    else if ((edges & (BACK | FIRE)) != 0) exit();
+                    synchronized (this) {
+                        if (closed) return;
+                        if (city != null && !artFailure) advance(keys | edges, edges);
+                        else if ((edges & (BACK | FIRE)) != 0) exit();
+                    }
                     render(graphics);
                     flushGraphics();
                     deadline += 33;
@@ -167,19 +178,33 @@ public final class CrimeDistrict extends MIDlet {
             CrimeDistrict.this.notifyDestroyed();
         }
 
+        private void checkpoint() {
+            if (city != null) {
+                saveError = !saves.write(city);
+                savedRevision = city.story.revision;
+            }
+        }
+
+        private int menuItems() { return state == TITLE && saves.available() ? 3 : 2; }
+
         private void advance(int keys, int edges) {
             if (state == PLAY) {
                 if ((edges & (MENU | BACK)) != 0) {
                     state = PAUSE;
                     selection = 0;
+                    checkpoint();
                 } else {
                     city.tick((keys & UP) != 0, (keys & DOWN) != 0, (keys & LEFT) != 0,
                               (keys & RIGHT) != 0, (edges & FIRE) != 0);
                     city.follow(viewWidth(), viewHeight());
+                    if (city.story.revision != savedRevision || city.ticks%450 == 0) checkpoint();
+                    if (city.ticks%120 == 0) trimWalkers();
                 }
                 return;
             }
-            if ((edges & (UP | DOWN)) != 0) selection ^= 1;
+            int choices = menuItems();
+            if ((edges & UP) != 0) selection = (selection+choices-1)%choices;
+            if ((edges & DOWN) != 0) selection = (selection+1)%choices;
             if ((edges & BACK) != 0) {
                 if (state == PAUSE) state = PLAY;
                 else exit();
@@ -187,14 +212,31 @@ public final class CrimeDistrict extends MIDlet {
             }
             if ((edges & (MENU | FIRE)) == 0) return;
             if (state == TITLE) {
-                if (selection == 1) exit();
+                if (selection == choices-1) exit();
                 else {
-                    city.reset();
+                    boolean resumed = choices == 3 && selection == 0;
+                    if (resumed && !saves.load(city)) {
+                        saveError = true;
+                        return;
+                    }
+                    if (!resumed) {
+                        city.reset();
+                        checkpoint();
+                    }
+                    city.follow(viewWidth(),viewHeight());
+                    savedRevision = city.story.revision;
+                    for (int i = 1; i < walkers.length; i++) walkers[i] = null;
                     state = PLAY;
                 }
             } else {
                 state = selection == 0 ? PLAY : TITLE;
                 selection = 0;
+            }
+        }
+
+        private void trimWalkers() {
+            for (int i = 1; i < walkers.length; i++) {
+                if (city.ticks-touched[i] > 180) walkers[i] = null;
             }
         }
 
@@ -209,7 +251,7 @@ public final class CrimeDistrict extends MIDlet {
             g.translate(ox, oy);
             g.setClip(0, 0, w, h);
             g.setFont(label);
-            if (city == null) {
+            if (city == null || artFailure) {
                 text(g, "RESOURCE LOAD ERROR", w / 2, h / 2, true, 0xffbf89);
             } else {
                 drawWorld(g, w, h);
@@ -226,7 +268,8 @@ public final class CrimeDistrict extends MIDlet {
             int lastRow = Math.min(city.rows - 1, (sy + h - 1) / 16);
             for (int row = sy / 16; row <= lastRow; row++) {
                 for (int col = sx / 16; col <= lastCol; col++) {
-                    int tile = city.tiles[row * city.columns + col] & 255;
+                    int tile = city.tileAt(col,row);
+                    if (tile == 44 || tile == 48) tile += (city.ticks/12 + (col+row)%2) % 4;
                     region(g, tiles, tile % 8 * 16, tile / 8 * 16, 16, 16, col * 16 - sx, row * 16 - sy);
                 }
             }
@@ -238,12 +281,9 @@ public final class CrimeDistrict extends MIDlet {
             if (!city.driving && visibleActor(city.heroX, city.heroY, sx, sy, w, h)) {
                 insertActor(visible++, HERO, city.heroY / District.UNIT + 3);
             }
-            if (visibleActor(city.carX, city.carY, sx, sy, w, h)) {
-                insertActor(visible++, SEDAN, city.carY / District.UNIT + District.carHalfHeight(city.carDir));
-            }
             for (int i = 0; i < city.street.length; i++) {
                 District.Actor actor = city.street[i];
-                if (visibleActor(actor.x, actor.y, sx, sy, w, h)) {
+                if (!actor.deferred && visibleActor(actor.x, actor.y, sx, sy, w, h)) {
                     int foot = actor.vehicle ? District.halfHeight(actor.dir, actor.model) : 3;
                     insertActor(visible++, i, actor.y / District.UNIT + foot);
                 }
@@ -258,16 +298,18 @@ public final class CrimeDistrict extends MIDlet {
                 drawProp(g, prop, sx, sy, w, h);
             }
             while (actor < visible) drawActor(g, drawOrder[actor++], sx, sy);
-            if (state == PLAY && city.mission != District.COMPLETE) {
-                drawTarget(g, city.targetX() - sx, city.targetY() - sy, w, h);
+            if (state == PLAY && city.story.marker()) {
+                drawTarget(g, city.story.targetX(city) - sx, city.story.targetY(city) - sy, w, h);
             }
-            if (state == PLAY && !city.driving && city.nearCar()) {
-                int x = city.carX / District.UNIT - sx;
-                int y = city.carY / District.UNIT - sy - 61;
+            District.Actor door = state == PLAY && !city.driving ? city.nearbyCar() : null;
+            if (door != null) {
+                int x = door.x / District.UNIT - sx;
+                int y = door.y / District.UNIT - sy - 61;
                 x = Math.max(58, Math.min(w - 58, x));
                 y = Math.max(56, y);
                 panel(g, x - 57, y, 114, 20, 0x25232b);
-                text(g, "5  ENTER VEHICLE", x, y + 2, true, 0xffe0aa);
+                text(g, door.role == Street.CIVILIAN && !door.claimed ? "5  TAKE VEHICLE" : "5  ENTER VEHICLE",
+                     x, y + 2, true, 0xffe0aa);
                 g.fillTriangle(x - 4, y + 21, x + 4, y + 21, x, y + 25);
             }
         }
@@ -299,14 +341,18 @@ public final class CrimeDistrict extends MIDlet {
             if (id == HERO) {
                 drawWalker(g, 0, city.heroDir, city.walking ? walkFrame(city.stride / 6) : 0,
                            city.heroX / District.UNIT - sx, city.heroY / District.UNIT - sy);
-            } else if (id == SEDAN) {
-                region(g, sedan, city.carDir * 44, 0, 44, 44, city.carX / District.UNIT - sx - 22,
-                       city.carY / District.UNIT - sy - 22);
             } else {
                 District.Actor actor = city.street[id];
                 int x = actor.x / District.UNIT - sx, y = actor.y / District.UNIT - sy;
                 if (actor.vehicle) {
-                    region(g, traffic, actor.dir * 48, (actor.model - 1) * 48, 48, 48, x - 24, y - 24);
+                    if (actor.model == 0 || actor.model == 4) {
+                        region(g, actor.model == 0 ? sedan : cruiser, actor.dir * 44, 0, 44, 44, x - 22,y - 22);
+                        if (actor.model == 4 && actor.duty == Street.CHASE) {
+                            fill(g, (city.ticks/5)%2 == 0 ? 0xe38b7e : 0x94b8d7, x-2, y-8, 4, 1);
+                        }
+                    } else {
+                        region(g, traffic, actor.dir * 48, (actor.model - 1) * 48, 48, 48, x - 24, y - 24);
+                    }
                 } else {
                     drawWalker(g, actor.model, actor.dir, actor.moving ? walkFrame(actor.stride / 8) : 0, x, y);
                 }
@@ -319,6 +365,15 @@ public final class CrimeDistrict extends MIDlet {
         }
 
         private void drawWalker(Graphics g, int model, int direction, int frame, int x, int y) {
+            touched[model] = city.ticks;
+            if (walkers[model] == null) {
+                try {
+                    walkers[model] = Image.createImage("/pedestrian" + model + ".png");
+                } catch (IOException missing) {
+                    artFailure = true;
+                    return;
+                }
+            }
             region(g, walkers[model], frame * 24, direction * 36, 24, 36, x - 12, y - 31);
         }
 
@@ -354,19 +409,25 @@ public final class CrimeDistrict extends MIDlet {
         private void drawHud(Graphics g, int w, int h) {
             panel(g, 8, 8, 99, 20, 0x25232b);
             fill(g, 0xd5a367, 8, 8, 3, 20);
-            text(g, "DOWNTOWN", 17, 10, false, 0xffe0aa);
+            text(g, SECTORS[city.sector()], 17, 10, false, 0xffe0aa);
             panel(g, 8, h - 24, 49, 17, 0x25232b);
             text(g, "MENU", 32, h - 24, true, 0xe8d3b8);
-            if (city.mission != District.COMPLETE || city.celebration > 0) {
-                String title = city.mission == District.COMPLETE ? "DELIVERY COMPLETE" : "FIRST DELIVERY";
-                String task = city.mission == District.TO_PICKUP ? "Walk to pickup" :
-                              city.mission == District.TO_DELIVERY ? (city.driving ? "Drive to drop-off" : "Take the sedan") : "Free roam";
+            if (!city.story.finished() || city.story.delay > 0) {
+                String title = city.story.title();
+                String task = city.story.objective(city);
                 int boardWidth = Math.min(123, w - 16);
                 int bx = w - boardWidth - 8;
                 int by = w >= 236 ? 8 : 31;
                 panel(g, bx, by, boardWidth, 36, 0x25232b);
                 text(g, title, bx + boardWidth / 2, by + 3, true, 0xffe0aa);
                 text(g, task, bx + boardWidth / 2, by + 18, true, 0xcdb3a3);
+            }
+            if (city.wanted > 0) {
+                panel(g, 8, 31, 59, 17, 0x342831);
+                for (int i = 0; i < 3; i++) drawStar(g, 19+16*i,38,i < city.wanted);
+            } else if (city.notice > 0) {
+                panel(g, 8, 31, 95, 17, 0x342831);
+                text(g, "POLICE RELEASE", 55, 31, true, 0xffe0aa);
             }
             if (city.driving) {
                 panel(g, w - 113, h - 24, 105, 17, 0x25232b);
@@ -375,20 +436,29 @@ public final class CrimeDistrict extends MIDlet {
             }
         }
 
+        private void drawStar(Graphics g,int x,int y,boolean lit) {
+            g.setColor(lit ? 0xf4bc76 : 0x76555a);
+            g.fillTriangle(x,y-5,x-4,y+5,x+4,y+5);
+            g.fillTriangle(x-5,y-1,x+5,y-1,x,y+4);
+        }
+
         private void drawMenu(Graphics g, int w, int h) {
             int center = w / 2, y = h / 2 - 65;
-            panel(g, center - 105, y, 210, 130, 0x25232b);
+            panel(g, center - 105, y, 210, menuItems() == 3 ? 155 : 130, 0x25232b);
             fill(g, 0xe2a76b, center - 105, y, 210, 3);
             g.setFont(headline);
             text(g, state == TITLE ? "CRIME DISTRICT" : "PAUSED", center, y + 12, true, 0xffe0aa);
             g.setFont(label);
-            text(g, state == TITLE ? "DOWNTOWN  /  ALPHA 0.2.2" : "DOWNTOWN",
+            text(g, saveError ? "SAVE UNAVAILABLE" : state == TITLE ? "CITY  /  ALPHA 0.3.0" : SECTORS[city.sector()],
                  center, y + 41, true, 0xc8a58c);
-            for (int i = 0; i < 2; i++) {
+            int choices = menuItems();
+            for (int i = 0; i < choices; i++) {
                 int line = y + 65 + i * 25;
                 if (selection == i) panel(g, center - 76, line, 152, 21, 0x594042);
-                String caption = i == 0 ? (state == TITLE ? "NEW GAME" : "RESUME")
-                                        : (state == TITLE ? "EXIT" : "MAIN MENU");
+                String caption;
+                if (state == PAUSE) caption = i == 0 ? "RESUME" : "MAIN MENU";
+                else if (i == choices-1) caption = "EXIT";
+                else caption = i == 0 && choices == 3 ? "CONTINUE" : "NEW GAME";
                 text(g, caption, center, line + 2, true, selection == i ? 0xffe0aa : 0xbba49b);
             }
         }
